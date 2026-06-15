@@ -87,7 +87,7 @@ pub(crate) struct Polynomial<MonomialType, Scalar: PolynomialDtype> {
 
 impl<MonomialType, Scalar: PolynomialDtype> Polynomial<MonomialType, Scalar>
 where
-    MonomialType: HasAMomentMatrixId,
+    MonomialType: HasAMomentMatrixId + Ord + Clone,
 {
     pub(crate) fn get_unique_moment_matrix_id(&self) -> Option<u8> {
         let mut data_iter = self.data.iter();
@@ -98,6 +98,21 @@ where
         } else {
             None
         }
+    }
+
+    pub(crate) fn by_moment_matrix_id(&self) -> BTreeMap<u8, Self> {
+        let mut res_as_btree_maps = BTreeMap::new();
+
+        for (monomial, &coefficient) in self.data.iter() {
+            res_as_btree_maps
+                .entry(monomial.moment_matrix_id())
+                .and_modify(|internal_map: &mut BTreeMap<MonomialType, Scalar>| {
+                    internal_map.insert(monomial.clone(), coefficient);
+                })
+                .or_insert(BTreeMap::from([(monomial.clone(), coefficient)]));
+        }
+
+        res_as_btree_maps.into_iter().map(|(moment_matrix_id, data)| (moment_matrix_id, Polynomial { data })).collect()
     }
 }
 

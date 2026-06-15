@@ -1,17 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import numpy as np
 from scipy.sparse import coo_matrix
-
-from ncpoleon.relaxations import (
-    ComplexValuedCommutativeSdpRelaxation,
-    ComplexValuedNonCommutativeSdpRelaxation,
-    RealValuedCommutativeSdpRelaxation,
-    RealValuedNonCommutativeSdpRelaxation,
-)
 
 try:
     import picos as pc
@@ -22,16 +15,21 @@ except ImportError:
     if TYPE_CHECKING:
         import picos as pc
 
-if TYPE_CHECKING:
-    from ncpoleon.polynomials import _Scalar
+from ncpoleon.polynomials.commutative_polynomials import CommutativePolynomialElement
+from ncpoleon.polynomials.noncommutative_polynomials import NonCommutativePolynomialElement
 
+PolynomialElements = TypeVar("PolynomialElements", CommutativePolynomialElement, NonCommutativePolynomialElement)
+Scalar = TypeVar("Scalar", float, complex)
+
+if TYPE_CHECKING:
+    from ncpoleon.relaxations import BaseSdpRelaxation
 
 logger = logging.getLogger(__name__)
 
 
 @overload
 def convert_row_col_data_to_coo_matrix(
-    position_matrix: tuple[list[int], list[int], list[_Scalar]], size: int
+    position_matrix: tuple[list[int], list[int], list[Scalar]], size: int
 ) -> coo_matrix: ...
 
 
@@ -40,7 +38,7 @@ def convert_row_col_data_to_coo_matrix(position_matrix: None, size: int) -> None
 
 
 def convert_row_col_data_to_coo_matrix(
-    position_matrix: tuple[list[int], list[int], list[_Scalar]] | None, size: int
+    position_matrix: tuple[list[int], list[int], list[Scalar]] | None, size: int
 ) -> coo_matrix | None:
     if position_matrix is None:
         return None
@@ -51,10 +49,7 @@ def convert_row_col_data_to_coo_matrix(
 
 
 def to_picos(
-    sdp: RealValuedCommutativeSdpRelaxation
-    | ComplexValuedCommutativeSdpRelaxation
-    | RealValuedNonCommutativeSdpRelaxation
-    | ComplexValuedNonCommutativeSdpRelaxation,
+    sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
     objective_direction: str,
     *,
     primal: bool,

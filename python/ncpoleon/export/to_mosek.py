@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 try:
     # The following import allows to use dunder methods on MOSEK expressions
@@ -16,16 +16,14 @@ except ImportError:
     if TYPE_CHECKING:
         from mosek.fusion import Expr, ExprMulScalarConst, Matrix, Model, PSDVariable, SparseMatrix
 
+from ncpoleon.polynomials.commutative_polynomials import CommutativePolynomialElement
+from ncpoleon.polynomials.noncommutative_polynomials import NonCommutativePolynomialElement
+
+PolynomialElements = TypeVar("PolynomialElements", CommutativePolynomialElement, NonCommutativePolynomialElement)
+Scalar = TypeVar("Scalar", float, complex)
+
 if TYPE_CHECKING:
-    from ncpoleon.polynomials.commutative_polynomials import CommutativeMonomial
-    from ncpoleon.polynomials.noncommutative_polynomials import NonCommutativeMonomial
-    from ncpoleon.relaxations import (
-        ComplexValuedCommutativeSdpRelaxation,
-        ComplexValuedNonCommutativeSdpRelaxation,
-        MomentMatrix,
-        RealValuedCommutativeSdpRelaxation,
-        RealValuedNonCommutativeSdpRelaxation,
-    )
+    from ncpoleon.relaxations import BaseSdpRelaxation
 
 
 logger = logging.getLogger(__name__)
@@ -161,10 +159,7 @@ def mosek_antihermitianize(M_re: SparseMatrix, M_im: SparseMatrix) -> ExprMulSca
 #  provides the function with what's a real variable, a complex one, a symmetric one, a hermitian one, and such
 #  that the variables can be multiplied together, be taken the trace of, etc.
 def to_mosek(
-    sdp: RealValuedCommutativeSdpRelaxation
-    | ComplexValuedCommutativeSdpRelaxation
-    | RealValuedNonCommutativeSdpRelaxation
-    | ComplexValuedNonCommutativeSdpRelaxation,
+    sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
     objective_direction: str,
     *,
     primal: bool,

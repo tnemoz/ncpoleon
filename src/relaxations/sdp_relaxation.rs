@@ -469,6 +469,24 @@ macro_rules! impl_sdp_relaxation_pymethods {
             fn moment_inequalities(&self) -> Vec<($py_poly, f64)> {
                 self.0.moment_inequalities.iter().map(|(poly, value)| ($py_poly(poly.clone()), *value)).collect()
             }
+
+            #[getter]
+            fn equalities(&self) -> BTreeMap<u8, Vec<$py_poly>> {
+                self.0.
+                    equalities.
+                    iter()
+                    .map(|(&mm_id, equalities_id)| (mm_id,equalities_id.iter().map(|poly| $py_poly(poly.clone())).collect()))
+                    .collect()
+            }
+
+            #[getter]
+            fn inequalities(&self) -> BTreeMap<u8, Vec<$py_poly>> {
+                self.0
+                    .inequalities
+                    .iter()
+                    .map(|(&mm_id, equalities_id)| (mm_id, equalities_id.iter().map(|poly| $py_poly(poly.clone())).collect()))
+                    .collect()
+            }
         }
     };
 }

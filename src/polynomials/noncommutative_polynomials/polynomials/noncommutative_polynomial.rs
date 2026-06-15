@@ -366,6 +366,10 @@ impl PythonRealCoefficientsNonCommutativePolynomial {
             .collect()
     }
 
+    fn by_moment_matrix_id(&self) -> BTreeMap<u8, Self> {
+        self.0.by_moment_matrix_id().into_iter().map(|(mm_id, poly)| (mm_id, Self(poly))).collect()
+    }
+
     #[getter]
     fn is_real(&self) -> bool {
         true
@@ -579,6 +583,10 @@ impl PythonComplexCoefficientsNonCommutativePolynomial {
             .iter()
             .map(|(rust_monomial, &coeff)| (PythonNonCommutativeMonomial(rust_monomial.clone()), coeff))
             .collect()
+    }
+
+    fn by_moment_matrix_id(&self) -> BTreeMap<u8, Self> {
+        self.0.by_moment_matrix_id().into_iter().map(|(mm_id, poly)| (mm_id, Self(poly))).collect()
     }
 
     #[getter]
