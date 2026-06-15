@@ -548,7 +548,7 @@ impl PythonComplexCoefficientsCommutativePolynomial {
     }
 
     /// Return the complex conjugate of this polynomial.
-    fn conjugate(&self) -> Self {
+    fn adjoint(&self) -> Self {
         Self(self.0.adjoint())
     }
 

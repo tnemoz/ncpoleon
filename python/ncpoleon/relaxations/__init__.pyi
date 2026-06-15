@@ -1,6 +1,6 @@
 from typing import Generic, Literal, TypeAlias, TypeVar, overload
 
-from ncpoleon.polynomials import Polynomial, RewritingStrategy
+from ncpoleon.polynomials import Polynomial, RewritingStrategy, VectorSpaceElement
 from ncpoleon.polynomials.commutative_polynomials import (
     CommutativeOperator,
     CommutativePolynomialElement,
@@ -72,6 +72,23 @@ class BaseSdpRelaxation(Generic[PolynomialElements, Scalar]):
     @property
     def is_real(self) -> bool: ...
     def reduce_monomial(self, monomial: PolynomialElements) -> PolynomialElements: ...
+    def split_into_real_and_imaginary_parts(
+        self, polynomial: Polynomial[PolynomialElements, Scalar]
+    ) -> tuple[
+        dict[PolynomialElements, tuple[float, float | None]],
+        dict[PolynomialElements, tuple[float, float | None]] | None,
+    ]: ...
+    def change_variables(
+        self,
+        polynomial: Polynomial[PolynomialElements, Scalar],
+        mapping: dict[PolynomialElements, VectorSpaceElement[Scalar]],
+    ) -> VectorSpaceElement[Scalar]: ...
+    @property
+    def generating_sets(self) -> dict[int, list[PolynomialElements]]: ...
+    @property
+    def equalities(self) -> dict[int, list[Polynomial[PolynomialElements, Scalar]]]: ...
+    @property
+    def inequalities(self) -> dict[int, list[Polynomial[PolynomialElements, Scalar]]]: ...
 
 class RealValuedCommutativeSdpRelaxation(BaseSdpRelaxation[CommutativePolynomialElement, float]):
     @property

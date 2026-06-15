@@ -24,10 +24,16 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
         model: Model,
         primal: bool,
+        objective_sense: str,
     ):
         self._relaxation = relaxation
         self._model = model
         self._primal = primal
+
+        if objective_sense not in ["min", "max"]:
+            raise ValueError(f'objective_sense should be "min" or "max" but {objective_sense} was given.')
+
+        self._objective_sense = objective_sense
 
     @property
     def value(self) -> np.float64:
@@ -56,7 +62,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 + self._model.getVariable(f"{str(monomial)}_im").level()[0] * 1j
             )
         else:
-            sign = 1 if self._model.getTask().getobjsense() == "maximize" else -1
+            sign = 1 if self._objective_sense == "max" else -1
 
             if is_real_valued:
                 return self._model.getConstraint(f"M-{canonical_monomial}").dual()[0] * sign
@@ -122,7 +128,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         ) in self._relaxation.localising_moment_matrices_equalities.items():
             to_add = []
 
-            for index, localizing_moment_matrix in enumerate(localizing_moment_matrices_equalities_id):
+            for index, (localizing_moment_matrix, equality_constraint) in enumerate(
+                zip(localizing_moment_matrices_equalities_id, self._relaxation.equalities.get(id, []), strict=True)
+            ):
                 if self._primal:
                     localizing_moment_matrix_level = self._model.getConstraint(f"LMME-{id}-{index}").level()
                 else:
@@ -133,8 +141,11 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
                 if self._relaxation.is_real:
                     to_add.append(
-                        localizing_moment_matrix_level.reshape(
-                            localizing_moment_matrix.size, localizing_moment_matrix.size
+                        (
+                            equality_constraint,
+                            localizing_moment_matrix_level.reshape(
+                                localizing_moment_matrix.size, localizing_moment_matrix.size
+                            ),
                         )
                     )
                 else:
@@ -142,11 +153,16 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
                     to_add.append(
-                        localizing_moment_matrix_level[: localizing_moment_matrix.size, : localizing_moment_matrix.size]
-                        + 1j
-                        * localizing_moment_matrix_level[
-                            localizing_moment_matrix.size :, : localizing_moment_matrix.size
-                        ]
+                        (
+                            equality_constraint,
+                            localizing_moment_matrix_level[
+                                : localizing_moment_matrix.size, : localizing_moment_matrix.size
+                            ]
+                            + 1j
+                            * localizing_moment_matrix_level[
+                                localizing_moment_matrix.size :, : localizing_moment_matrix.size
+                            ],
+                        )
                     )
 
             res[id] = to_add
@@ -154,7 +170,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         return res
 
     @property
-    def localizing_matrices_equality_multipliers_by_mm_id(self) -> dict[int, list[np.ndarray]]:
+    def localizing_matrices_equality_multipliers_by_mm_id(
+        self,
+    ) -> dict[int, list[tuple[Polynomial[PolynomialElements, Scalar], np.ndarray]]]:
         res = {}
 
         for (
@@ -163,7 +181,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         ) in self._relaxation.localising_moment_matrices_equalities.items():
             to_add = []
 
-            for index, localizing_moment_matrix in enumerate(localizing_moment_matrices_equalities_id):
+            for index, (localizing_moment_matrix, equality_constraint) in enumerate(
+                zip(localizing_moment_matrices_equalities_id, self._relaxation.equalities.get(id, []), strict=True)
+            ):
                 if self._primal:
                     localizing_moment_matrix_dual = self._model.getConstraint(f"LMME-{id}-{index}").dual()
                 else:
@@ -174,8 +194,11 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
                 if self._relaxation.is_real:
                     to_add.append(
-                        localizing_moment_matrix_dual.reshape(
-                            localizing_moment_matrix.size, localizing_moment_matrix.size
+                        (
+                            equality_constraint,
+                            localizing_moment_matrix_dual.reshape(
+                                localizing_moment_matrix.size, localizing_moment_matrix.size
+                            ),
                         )
                     )
                 else:
@@ -183,11 +206,16 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
                     to_add.append(
-                        localizing_moment_matrix_dual[: localizing_moment_matrix.size, : localizing_moment_matrix.size]
-                        + 1j
-                        * localizing_moment_matrix_dual[
-                            localizing_moment_matrix.size :, : localizing_moment_matrix.size
-                        ]
+                        (
+                            equality_constraint,
+                            localizing_moment_matrix_dual[
+                                : localizing_moment_matrix.size, : localizing_moment_matrix.size
+                            ]
+                            + 1j
+                            * localizing_moment_matrix_dual[
+                                localizing_moment_matrix.size :, : localizing_moment_matrix.size
+                            ],
+                        )
                     )
 
             res[id] = to_add
@@ -195,7 +223,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         return res
 
     @property
-    def localizing_matrices_inequality_by_mm_id(self) -> dict[int, list[np.ndarray]]:
+    def localizing_matrices_inequality_by_mm_id(
+        self,
+    ) -> dict[int, list[tuple[Polynomial[PolynomialElements, Scalar], np.ndarray]]]:
         res = {}
 
         for (
@@ -204,7 +234,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         ) in self._relaxation.localising_moment_matrices_inequalities.items():
             to_add = []
 
-            for index, localizing_moment_matrix in enumerate(localizing_moment_matrices_inequalities_id):
+            for index, (localizing_moment_matrix, inequality_constraint) in enumerate(
+                zip(localizing_moment_matrices_inequalities_id, self._relaxation.inequalities.get(id, []), strict=True)
+            ):
                 if self._primal:
                     localizing_moment_matrix_level = self._model.getConstraint(f"LMMI-{id}-{index}").level()
                 else:
@@ -212,8 +244,11 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
                 if self._relaxation.is_real:
                     to_add.append(
-                        localizing_moment_matrix_level.reshape(
-                            localizing_moment_matrix.size, localizing_moment_matrix.size
+                        (
+                            inequality_constraint,
+                            localizing_moment_matrix_level.reshape(
+                                localizing_moment_matrix.size, localizing_moment_matrix.size
+                            ),
                         )
                     )
                 else:
@@ -221,11 +256,16 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
                     to_add.append(
-                        localizing_moment_matrix_level[: localizing_moment_matrix.size, : localizing_moment_matrix.size]
-                        + 1j
-                        * localizing_moment_matrix_level[
-                            localizing_moment_matrix.size :, : localizing_moment_matrix.size
-                        ]
+                        (
+                            inequality_constraint,
+                            localizing_moment_matrix_level[
+                                : localizing_moment_matrix.size, : localizing_moment_matrix.size
+                            ]
+                            + 1j
+                            * localizing_moment_matrix_level[
+                                localizing_moment_matrix.size :, : localizing_moment_matrix.size
+                            ],
+                        )
                     )
 
             res[id] = to_add
@@ -233,7 +273,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         return res
 
     @property
-    def localizing_matrices_inequality_multipliers_by_mm_id(self) -> dict[int, list[np.ndarray]]:
+    def localizing_matrices_inequality_multipliers_by_mm_id(
+        self,
+    ) -> dict[int, list[tuple[Polynomial[PolynomialElements, Scalar], np.ndarray]]]:
         res = {}
 
         for (
@@ -242,7 +284,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         ) in self._relaxation.localising_moment_matrices_inequalities.items():
             to_add = []
 
-            for index, localizing_moment_matrix in enumerate(localizing_moment_matrices_inequalities_id):
+            for index, (localizing_moment_matrix, inequality_constraint) in enumerate(
+                zip(localizing_moment_matrices_inequalities_id, self._relaxation.inequalities.get(id, []), strict=True)
+            ):
                 if self._primal:
                     localizing_moment_matrix_dual = self._model.getConstraint(f"LMMI-{id}-{index}").dual()
                 else:
@@ -250,8 +294,11 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
                 if self._relaxation.is_real:
                     to_add.append(
-                        localizing_moment_matrix_dual.reshape(
-                            localizing_moment_matrix.size, localizing_moment_matrix.size
+                        (
+                            inequality_constraint,
+                            localizing_moment_matrix_dual.reshape(
+                                localizing_moment_matrix.size, localizing_moment_matrix.size
+                            ),
                         )
                     )
                 else:
@@ -259,11 +306,16 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
                     to_add.append(
-                        localizing_moment_matrix_dual[: localizing_moment_matrix.size, : localizing_moment_matrix.size]
-                        + 1j
-                        * localizing_moment_matrix_dual[
-                            localizing_moment_matrix.size :, : localizing_moment_matrix.size
-                        ]
+                        (
+                            inequality_constraint,
+                            localizing_moment_matrix_dual[
+                                : localizing_moment_matrix.size, : localizing_moment_matrix.size
+                            ]
+                            + 1j
+                            * localizing_moment_matrix_dual[
+                                localizing_moment_matrix.size :, : localizing_moment_matrix.size
+                            ],
+                        )
                     )
 
             res[id] = to_add
@@ -271,37 +323,45 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         return res
 
     @property
-    def moment_equalities_multipliers(self) -> list[np.float64 | np.complex128]:
+    def moment_equalities_multipliers(
+        self,
+    ) -> list[tuple[Polynomial[PolynomialElements, Scalar], np.float64 | np.complex128]]:
         res = []
 
-        for index in range(len(self._relaxation.moment_equalities)):
+        for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_equalities):
             if self._primal:
                 if self._relaxation.is_real:
-                    res.append(self._model.getConstraint(f"ME-{index}").dual()[0])
+                    res.append((polynomial_constraint, self._model.getConstraint(f"ME-{index}").dual()[0]))
                 else:
                     res.append(
-                        self._model.getConstraint(f"ME-{index}_re").dual()[0]
-                        + self._model.getConstraint(f"ME-{index}_im").dual()[0] * 1j
+                        (
+                            polynomial_constraint,
+                            self._model.getConstraint(f"ME-{index}_re").dual()[0]
+                            + self._model.getConstraint(f"ME-{index}_im").dual()[0] * 1j,
+                        )
                     )
             else:
                 if self._relaxation.is_real:
-                    res.append(self._model.getVariable(f"nu_{index}").level()[0])
+                    res.append((polynomial_constraint, self._model.getVariable(f"nu_{index}").level()[0]))
                 else:
                     res.append(
-                        self._model.getVariable(f"nu_{index}^re").level()[0]
-                        + self._model.getVariable(f"nu_{index}^im").level()[0] * 1j
+                        (
+                            polynomial_constraint,
+                            self._model.getVariable(f"nu_{index}^re").level()[0]
+                            + self._model.getVariable(f"nu_{index}^im").level()[0] * 1j,
+                        )
                     )
 
         return res
 
     @property
-    def moment_inequalities_multipliers(self) -> list[np.float64]:
+    def moment_inequalities_multipliers(self) -> list[tuple[Polynomial[PolynomialElements, Scalar], np.float64]]:
         res = []
 
-        for index in range(len(self._relaxation.moment_inequalities)):
+        for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_inequalities):
             if self._primal:
-                res.append(self._model.getConstraint(f"MI-{index}").dual()[0])
+                res.append((polynomial_constraint, self._model.getConstraint(f"MI-{index}").dual()[0]))
             else:
-                res.append(self._model.getVariable(f"lambda_{index}").level()[0])
+                res.append((polynomial_constraint, self._model.getVariable(f"lambda_{index}").level()[0]))
 
         return res

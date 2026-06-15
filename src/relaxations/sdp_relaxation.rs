@@ -253,7 +253,7 @@ macro_rules! impl_sdp_relaxation_pymethods {
         impl $py_relaxation {
             fn change_variables<'py>(
                 &self,
-                // FIXME: shuld probaby use a reference here, otherwise the polynomial is cloned
+                // FIXME: should probaby use a reference here, otherwise the polynomial is cloned
                 polynomial: $py_poly,
                 mapping: &Bound<'py, PyDict>,
             ) -> PyResult<Bound<'py, PyAny>> {
@@ -421,6 +421,7 @@ macro_rules! impl_sdp_relaxation_pymethods {
             /// Dictionary of all generating sets
             ///
             /// Each element corresponds to a unique moment matrix index.
+            #[getter]
             fn generating_sets(&self) -> BTreeMap<u8, Vec<$py_monomial>> {
                 self.0
                     .generating_sets

@@ -27,7 +27,7 @@ def solve(
         model = to_mosek(relaxation, objective_direction, primal=force_primal, **solver_parameters)
         model.solve()
 
-        return MosekSolution(relaxation, model, primal=force_primal)
+        return MosekSolution(relaxation, model, primal=force_primal, objective_sense=objective_direction)
     elif solver == "picos":
         if "picos_solver" in solver_parameters:  # TODO: to put in the documentation of this function
             picos_solver = solver_parameters.pop("picos_solver")

@@ -26,16 +26,24 @@ def automatic_solver_detection() -> str:
 
 
 @overload
-def sqrtm_sdp_matrix(matrix: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]: ...
+def sos_vectors_of_hermitian_matrix(
+    matrix: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: ...
 @overload
-def sqrtm_sdp_matrix(matrix: npt.NDArray[np.complexfloating]) -> npt.NDArray[np.complexfloating]: ...
+def sos_vectors_of_hermitian_matrix(
+    matrix: npt.NDArray[np.complex128],
+) -> tuple[npt.NDArray[np.complex128], npt.NDArray[np.complex128]]: ...
 
 
-def sqrtm_sdp_matrix(
-    matrix: npt.NDArray[np.floating | np.complexfloating],
-) -> npt.NDArray[np.floating | np.complexfloating]:
+def sos_vectors_of_hermitian_matrix(
+    matrix: npt.NDArray[np.float64 | np.complex128],
+) -> tuple[npt.NDArray[np.float64 | np.complex128], npt.NDArray[np.float64 | np.complex128]]:
     eigvals, eigvecs = np.linalg.eigh(matrix)
-    eigvals = np.sqrt(np.clip(eigvals, 0, None))
-    result = (eigvecs * eigvals) @ eigvecs.conj().T
+    mask = eigvals >= 0
+    positive_eigvecs = eigvecs[:, mask]
+    positive_eigvals = np.sqrt(eigvals[mask])
+    negative_eigvecs = eigvecs[:, ~mask]
+    negative_eigvals = np.sqrt(-eigvals[~mask])
+    result = (positive_eigvals * positive_eigvecs).T.conj(), (negative_eigvals * negative_eigvecs).T.conj()
 
-    return cast(npt.NDArray[np.floating | np.complexfloating], result)
+    return cast(tuple[npt.NDArray[np.float64 | np.complex128], npt.NDArray[np.float64 | np.complex128]], result)
