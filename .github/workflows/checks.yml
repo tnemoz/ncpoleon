@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
   pull_request:
   workflow_dispatch:
 
@@ -24,7 +23,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-      - name: clippy
+      - name: Clippy
         run: cargo clippy --all-targets --all-features
 
   rustfmt:
@@ -36,7 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - name: rustfmt
+      - name: Rustfmt
         run: cargo +nightly fmt --check
 
   ruff:
@@ -45,7 +44,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           persist-credentials: false
-      - name: ruff
+      - name: Ruff
         uses: astral-sh/ruff-action@v4.0.0
 
   # TODO: re-enable once ty passes
