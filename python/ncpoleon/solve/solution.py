@@ -60,25 +60,6 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     def moment_matrix_multiplier_by_mm_id(self) -> dict[int, npt.NDArray[np.float64 | np.complex128]]: ...
 
     @property
-    def localizing_matrices_equality(
-        self,
-    ) -> list[tuple[Polynomial[PolynomialElements, Scalar], npt.NDArray[np.float64 | np.complex128]]]:
-        localizing_matrices = self.localizing_matrices_equality_by_mm_id
-        if len(localizing_matrices) > 1:
-            warnings.warn(
-                "The solution contains multiple moment matrices. The `localizing_matrices_equality` "
-                "property will only return the equality localizing moment matrices associated to the moment matrix of "
-                "index 0. Use `localizing_matrices_equality_constraints_by_mm_id` to access all of them.",
-            )
-        return localizing_matrices[0]
-
-    @property
-    @abstractmethod
-    def localizing_matrices_equality_by_mm_id(
-        self,
-    ) -> dict[int, list[tuple[Polynomial[PolynomialElements, Scalar], npt.NDArray[np.float64 | np.complex128]]]]: ...
-
-    @property
     def localizing_matrices_equality_multipliers(
         self,
     ) -> list[tuple[Polynomial[PolynomialElements, Scalar], npt.NDArray[np.float64 | np.complex128]]]:

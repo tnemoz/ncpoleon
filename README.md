@@ -1,6 +1,6 @@
 # Ncpoleon
 
-Ncpoleon approximates polynomial optimization problems of (non)commutative variables through semidefinite programming (SDP) relaxations. It is intended as a followup to [ncpol2sdpa](https://gitlab.com/peterwittek/ncpol2sdpa/), focused improved performance, functionality and long-term improvements. Currently the package can relax polynomial optimization problems in both commutative and noncommutative variables, i.e., we implement
+Ncpoleon approximates polynomial optimization problems of (non)commutative variables through semidefinite programming (SDP) relaxations. It is intended as a followup to [ncpol2sdpa](https://gitlab.com/peterwittek/ncpol2sdpa/), focused on improved performance, functionality and long-term improvements. Currently the package can relax polynomial optimization problems in both commutative and noncommutative variables, i.e., we implement
  - Lasserre's hierarchy: if all polynomials involved in the optimization problem are made of commutative variables, then the generated hierarchy is [Lasserre's](https://epubs.siam.org/doi/10.1137/S1052623400366802).
  - Noncommutative moment matrix hierarchy: if all polynomials involved in the optimization problem are made of noncommutative variables, then the generated hierarchy is [Pironio, Navascués and Acín's](https://arxiv.org/abs/0903.4368).
 
@@ -35,10 +35,9 @@ $$
 
 with $X_1$ and $X_2$ being Hermitian operators.
 
-We can generate and solve the associated SDP relaxation using the following Python code.
+We can generate and solve the associated SDP relaxation using the following Python code. Note that this requires either Picos or MOSEK to be installed to solve the relaxation.
 ```python
-from ncpoleon import generate_noncommutative_variables, get_relaxation
-from ncpoleon.export import to_picos
+from ncpoleon import generate_noncommutative_variables, get_relaxation, solve
 
 # Level of relaxation
 level = 1
@@ -55,12 +54,9 @@ operator_constraints = [x1 - x1**2 >= 0, x2 - x2**2 >= 0]
 # Generate the SDP relaxation
 sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints)
 
-# Export to PICOS
-problem = to_picos(sdp, "max", primal=True, verbosity=0)
-
-# Solve the exported problem
-problem.solve()
+# Solve the exported problem. MOSEK is preferably used if available, otherwise it defaults to Picos.
+solution = solve(sdp, "max")
 
 # Print the solution
-print(problem.value)
+print(solution.value)
 ```

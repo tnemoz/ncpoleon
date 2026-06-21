@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, Literal
+from typing import TYPE_CHECKING, Generic
 
 if TYPE_CHECKING:
     from ncpoleon.polynomials import Polynomial
@@ -29,9 +29,10 @@ class LocalizingMomentMatrixInequalityDecomposition(Generic[PolynomialElements, 
     generator: Polynomial[PolynomialElements, Scalar]
     decomposition: list[Polynomial[PolynomialElements, Scalar]]
 
+
 @dataclass(eq=False, order=False, kw_only=True)
 class LocalizingMomentMatrixEqualityDecomposition(Generic[PolynomialElements, Scalar]):
-    """A single lcoalizing moment matrix inequality contribution to a SoS decomposition.
+    """A single localizing moment matrix inequality contribution to a SoS decomposition.
 
     Docs TODO
     """
@@ -49,7 +50,7 @@ class SingleMomentDecomposition(Generic[PolynomialElements, Scalar]):
     """
 
     generator: Polynomial[PolynomialElements, Scalar]
-    coefficient: Scalar
+    coefficient: float
 
 
 @dataclass(eq=False, order=False, kw_only=True)
@@ -59,4 +60,3 @@ class SoSDecomposition(Generic[PolynomialElements, Scalar]):
     inequalities_terms: list[LocalizingMomentMatrixInequalityDecomposition[PolynomialElements, Scalar]]
     moment_equalities_terms: list[SingleMomentDecomposition[PolynomialElements, Scalar]]
     moment_inequalities_terms: list[SingleMomentDecomposition[PolynomialElements, Scalar]]
-

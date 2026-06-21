@@ -58,7 +58,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 + self._model.getVariable(f"{str(monomial)}_im").level()[0] * 1j
             )
         else:
-            sign = 1 if self._objective_sense == "max" else -1
+            sign = 1 if self._objective_sense == "min" else -1
 
             if is_real_valued:
                 return self._model.getConstraint(f"M-{canonical_monomial}").dual()[0] * sign
@@ -82,7 +82,8 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             if self._primal:
                 moment_matrix_level = self._model.getConstraint("MM-0").level()
             else:
-                moment_matrix_level = self._model.getVariable("Y_0").dual()
+                sign = 1 if self._objective_sense == "max" else -1
+                moment_matrix_level = self._model.getVariable("Y_0").dual() * sign
 
             if self._relaxation.is_real:
                 res[id] = moment_matrix_level.reshape(size, size)
@@ -100,7 +101,8 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             size = moment_matrix.size
 
             if self._primal:
-                moment_matrix_dual = self._model.getConstraint("MM-0").dual()
+                sign = 1 if self._objective_sense == "min" else -1
+                moment_matrix_dual = self._model.getConstraint("MM-0").dual() * sign
             else:
                 moment_matrix_dual = self._model.getVariable("Y_0").level()
 
@@ -109,59 +111,6 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             else:
                 moment_matrix_dual = moment_matrix_dual.reshape(2 * size, 2 * size)
                 res[id] = moment_matrix_dual[:size, :size] + 1j * moment_matrix_dual[size:, :size]
-
-        return res
-
-    @property
-    def localizing_matrices_equality_by_mm_id(
-        self,
-    ) -> dict[int, list[tuple[Polynomial[PolynomialElements, Scalar], np.ndarray]]]:
-        res = {}
-
-        for (
-            id,
-            localizing_moment_matrices_equalities_id,
-        ) in self._relaxation.localising_moment_matrices_equalities.items():
-            to_add = []
-
-            for index, (localizing_moment_matrix, equality_constraint) in enumerate(
-                zip(localizing_moment_matrices_equalities_id, self._relaxation.equalities.get(id, []), strict=True)
-            ):
-                if self._primal:
-                    localizing_moment_matrix_level = self._model.getConstraint(f"LMME-{id}-{index}").level()
-                else:
-                    localizing_moment_matrix_level = (
-                        self._model.getVariable(f"Q_({id}, {index})^0").dual()
-                        - self._model.getVariable(f"Q_({id}, {index})^1").dual()
-                    )
-
-                if self._relaxation.is_real:
-                    to_add.append(
-                        (
-                            equality_constraint,
-                            localizing_moment_matrix_level.reshape(
-                                localizing_moment_matrix.size, localizing_moment_matrix.size
-                            ),
-                        )
-                    )
-                else:
-                    localizing_moment_matrix_level = localizing_moment_matrix_level.reshape(
-                        2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
-                    )
-                    to_add.append(
-                        (
-                            equality_constraint,
-                            localizing_moment_matrix_level[
-                                : localizing_moment_matrix.size, : localizing_moment_matrix.size
-                            ]
-                            + 1j
-                            * localizing_moment_matrix_level[
-                                localizing_moment_matrix.size :, : localizing_moment_matrix.size
-                            ],
-                        )
-                    )
-
-            res[id] = to_add
 
         return res
 
@@ -181,7 +130,13 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 zip(localizing_moment_matrices_equalities_id, self._relaxation.equalities.get(id, []), strict=True)
             ):
                 if self._primal:
-                    localizing_moment_matrix_dual = self._model.getConstraint(f"LMME-{id}-{index}").dual()
+                    # FIXME: this doesn't return a Hermitian matrix, we probably have to hermitianize it, to check that
+                    #  it does return the right SoS decomposition. We probably have to write down how to compute the SoS
+                    #  for localizing matrices to check i.e. what does the resulting PSD variable represent
+                    # localizing_moment_matrix_dual = self._model.getConstraint(f"LMME-{id}-{index}").dual()
+                    raise NotImplementedError(
+                        "Getting the multiplier of a localizing matrix equality using the primal isn't supported yet."
+                    )
                 else:
                     localizing_moment_matrix_dual = (
                         self._model.getVariable(f"Q_({id}, {index})^0").level()
@@ -236,7 +191,8 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 if self._primal:
                     localizing_moment_matrix_level = self._model.getConstraint(f"LMMI-{id}-{index}").level()
                 else:
-                    localizing_moment_matrix_level = self._model.getVariable(f"P_({id}, {index})").dual()
+                    sign = 1 if self._objective_sense == "max" else -1
+                    localizing_moment_matrix_level = self._model.getVariable(f"P_({id}, {index})").dual() * sign
 
                 if self._relaxation.is_real:
                     to_add.append(
@@ -284,7 +240,8 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 zip(localizing_moment_matrices_inequalities_id, self._relaxation.inequalities.get(id, []), strict=True)
             ):
                 if self._primal:
-                    localizing_moment_matrix_dual = self._model.getConstraint(f"LMMI-{id}-{index}").dual()
+                    sign = 1 if self._objective_sense == "min" else -1
+                    localizing_moment_matrix_dual = self._model.getConstraint(f"LMMI-{id}-{index}").dual() * sign
                 else:
                     localizing_moment_matrix_dual = self._model.getVariable(f"P_({id}, {index})").level()
 
@@ -326,14 +283,18 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_equalities):
             if self._primal:
+                sign = 1 if self._objective_sense == "min" else -1
                 if self._relaxation.is_real:
-                    res.append((polynomial_constraint, self._model.getConstraint(f"ME-{index}").dual()[0]))
+                    res.append((polynomial_constraint, self._model.getConstraint(f"ME-{index}").dual()[0] * sign))
                 else:
                     res.append(
                         (
                             polynomial_constraint,
-                            self._model.getConstraint(f"ME-{index}_re").dual()[0]
-                            + self._model.getConstraint(f"ME-{index}_im").dual()[0] * 1j,
+                            (
+                                self._model.getConstraint(f"ME-{index}_re").dual()[0]
+                                + self._model.getConstraint(f"ME-{index}_im").dual()[0] * 1j
+                            )
+                            * sign,
                         )
                     )
             else:
@@ -356,7 +317,8 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_inequalities):
             if self._primal:
-                res.append((polynomial_constraint, self._model.getConstraint(f"MI-{index}").dual()[0]))
+                sign = 1 if self._objective_sense == "min" else -1
+                res.append((polynomial_constraint, self._model.getConstraint(f"MI-{index}").dual()[0] * sign))
             else:
                 res.append((polynomial_constraint, self._model.getVariable(f"lambda_{index}").level()[0]))
 
