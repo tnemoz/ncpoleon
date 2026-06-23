@@ -96,8 +96,7 @@ def to_picos(
                 mon * pos_matrix + (0 if pos_matrix_conj is None else mon.conj() * pos_matrix_conj)
                 for mon, (pos_matrix, pos_matrix_conj) in mapped_moment_matrix.items()
             )
-            constraints[f"MM-{moment_matrix_id}"] = G >> 0
-            problem.add_constraint(constraints[f"MM-{moment_matrix_id}"])
+            constraints[f"MM-{moment_matrix_id}"] = problem.add_constraint(G >> 0)
             logger.debug(f"Added moment matrix PSD constraint for moment matrix id {moment_matrix_id}.")
 
         for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
@@ -112,8 +111,7 @@ def to_picos(
                     )
                     for mon, (pos_matrix, pos_matrix_conj) in equality_moment_matrix.as_row_col_data_format().items()
                 )
-                constraints[f"LMME-{moment_matrix_id}-{index}"] = new_localising_matrix == 0
-                problem.add_constraint(constraints[f"LMME-{moment_matrix_id}-{index}"])
+                constraints[f"LMME-{moment_matrix_id}-{index}"] = problem.add_constraint(new_localising_matrix == 0)
                 logger.debug(f"Added constraint {new_localising_matrix} == 0 for moment matrix id {moment_matrix_id}.")
 
         for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
@@ -129,21 +127,18 @@ def to_picos(
                     )
                     for mon, (pos_matrix, pos_matrix_conj) in inequality_moment_matrix.as_row_col_data_format().items()
                 )
-                constraints[f"LMMI-{moment_matrix_id}-{index}"] = new_localising_matrix >> 0
-                problem.add_constraint(constraints[f"LMMI-{moment_matrix_id}-{index}"])
+                constraints[f"LMMI-{moment_matrix_id}-{index}"] = problem.add_constraint(new_localising_matrix >> 0)
                 logger.debug(f"Added constraint {new_localising_matrix} ≽ 0 for moment matrix id {moment_matrix_id}.")
 
         # FIXME: We should instead pass the mapped variables to the relaxation, which could then return all the moment
         #  at once. That would reduce conversion costs
 
         for index, (poly, value) in enumerate(sdp.moment_equalities):
-            constraints[f"ME-{index}"] = sdp.change_variables(poly, mapped_variables) == value
-            problem.add_constraint(constraints[f"ME-{index}"])
+            constraints[f"ME-{index}"] = problem.add_constraint(sdp.change_variables(poly, mapped_variables) == value)
             logger.debug(f"Added moment constraint {poly} == {value} for moment matrix id {moment_matrix_id}.")
 
         for index, (poly, value) in enumerate(sdp.moment_inequalities):
-            constraints[f"MI-{index}"] = sdp.change_variables(poly, mapped_variables) >= value
-            problem.add_constraint(constraints[f"MI-{index}"])
+            constraints[f"MI-{index}"] = problem.add_constraint(sdp.change_variables(poly, mapped_variables) >= value)
             logger.debug(f"Added moment constraint {poly} >= {value} for moment matrix id {moment_matrix_id}.")
 
         problem.set_objective(objective_direction, sdp.change_variables(sdp.objective, mapped_variables))
@@ -194,8 +189,7 @@ def to_picos(
 
         for moment_matrix_index, moment_matrix in sdp.moment_matrices.items():
             Y = variable_builder(f"Y_{moment_matrix_index}", moment_matrix.size)
-            constraints[f"Y_{moment_matrix_index}"] = Y >> 0
-            problem.add_constraint(constraints[f"Y_{moment_matrix_index}"])
+            constraints[f"Y_{moment_matrix_index}"] = problem.add_constraint(Y >> 0)
             logger.debug(f"Added PSD variable Y_{moment_matrix_index} of size {moment_matrix.size}.")
 
             Ps = []
@@ -207,8 +201,7 @@ def to_picos(
                         inequality_localizing_matrix.size,
                     )
                 )
-                constraints[f"P_{(moment_matrix_index, inequality_index)}"] = Ps[-1] >> 0
-                problem.add_constraint(constraints[f"P_{(moment_matrix_index, inequality_index)}"])
+                constraints[f"P_{(moment_matrix_index, inequality_index)}"] = problem.add_constraint(Ps[-1] >> 0)
                 logger.debug(f"Added PSD variable(s) P_{(moment_matrix_index, inequality_index)}.")
 
             Qs = []
@@ -304,11 +297,10 @@ def to_picos(
                 alpha = alpha_re + alpha_im * 1j
 
                 if objective_direction == "min":
-                    constraints[f"M-{monomial}"] = new_constraint == alpha
+                    constraints[f"M-{monomial}"] = problem.add_constraint(new_constraint == alpha)
                 else:
-                    constraints[f"M-{monomial}"] = new_constraint == -alpha
+                    constraints[f"M-{monomial}"] = problem.add_constraint(new_constraint == -alpha)
 
-                problem.add_constraint(constraints[f"M-{monomial}"])
                 logger.debug(f"Added dual constraint for monomial {monomial}.")
 
     logger.info("PICOS problem created.")

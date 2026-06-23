@@ -141,14 +141,11 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             for index, (localizing_moment_matrix, equality_constraint) in enumerate(
                 zip(localizing_moment_matrices_equalities_id, self._relaxation.equalities.get(id, []), strict=True)
             ):
+                # The equality constraints on symmetric matrices are redundant, and thus Mosek only returns a
+                # lower-triangular matrix for the dual, which we have to hermitianize further down
                 if self._primal:
-                    # FIXME: this doesn't return a Hermitian matrix, we probably have to hermitianize it, to check that
-                    #  it does return the right SoS decomposition. We probably have to write down how to compute the SoS
-                    #  for localizing matrices to check i.e. what does the resulting PSD variable represent
-                    # localizing_moment_matrix_dual = self._model.getConstraint(f"LMME-{id}-{index}").dual()
-                    raise NotImplementedError(
-                        "Getting the multiplier of a localizing matrix equality using the primal isn't supported yet."
-                    )
+                    sign = 1 if self._objective_sense == "min" else -1
+                    localizing_moment_matrix_dual = self._model.getConstraint(f"LMME-{id}-{index}").dual() * sign
                 else:
                     localizing_moment_matrix_dual = (
                         self._model.getVariable(f"Q_({id}, {index})^0").level()
@@ -156,30 +153,30 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                     )
 
                 if self._relaxation.is_real:
-                    to_add.append(
-                        (
-                            equality_constraint,
-                            localizing_moment_matrix_dual.reshape(
-                                localizing_moment_matrix.size, localizing_moment_matrix.size
-                            ),
-                        )
+                    to_hermitianize = localizing_moment_matrix_dual.reshape(
+                        localizing_moment_matrix.size, localizing_moment_matrix.size
                     )
+
+                    if self._primal:
+                        to_hermitianize = (to_hermitianize + to_hermitianize.T.conj()) / 2
+
+                    to_add.append((equality_constraint, to_hermitianize))
                 else:
                     localizing_moment_matrix_dual = localizing_moment_matrix_dual.reshape(
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
-                    to_add.append(
-                        (
-                            equality_constraint,
-                            localizing_moment_matrix_dual[
-                                : localizing_moment_matrix.size, : localizing_moment_matrix.size
-                            ]
-                            + 1j
-                            * localizing_moment_matrix_dual[
-                                localizing_moment_matrix.size :, : localizing_moment_matrix.size
-                            ],
-                        )
+                    to_hermitianize = (
+                        localizing_moment_matrix_dual[: localizing_moment_matrix.size, : localizing_moment_matrix.size]
+                        + 1j
+                        * localizing_moment_matrix_dual[
+                            localizing_moment_matrix.size :, : localizing_moment_matrix.size
+                        ]
                     )
+
+                    if self._primal:
+                        to_hermitianize = (to_hermitianize + to_hermitianize.T.conj()) / 2
+
+                    to_add.append((equality_constraint, to_hermitianize))
 
             res[id] = to_add
 

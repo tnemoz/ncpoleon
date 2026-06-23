@@ -98,4 +98,7 @@ def test_multiple_moment_matrices(solver, use_primal, level, w, expected):
 
     sol = solve(sdp, "max", force_primal=use_primal, solver=solver)
     assert -log2(sol.value) == pytest.approx(expected, abs=1e-6)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) + objective)).is_zero(1e-7)
+    sos_decompositions = sol.get_sos_decomposition_by_mm_id()
+    reduced_0 = sdp.rewrite(reduce_sos_decomposition(sos_decompositions[0]))
+    reduced_1 = sdp.rewrite(reduce_sos_decomposition(sos_decompositions[1]))
+    assert (reduced_0 + reduced_1 + objective).is_zero(1e-7)

@@ -91,23 +91,24 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     ]:
         res = {}
 
-        for (
-            id,
-            localizing_moment_matrices_equalities_id,
-        ) in self._relaxation.localising_moment_matrices_equalities.items():
+        for id in self._relaxation.localising_moment_matrices_equalities:
             to_add = []
 
             for index, equality_constraint in enumerate(self._relaxation.equalities.get(id, [])):
+                # The equality constraints on symmetric matrices are redundant, and thus Picos doesn't return a
+                # Hermitian matrix for the dual, so we have to hermitianize it
                 if self._primal:
-                    # FIXME: this doesn't return a Hermitian matrix, we probably have to hermitianize it, to check that
-                    #  it does return the right SoS decomposition. We probably have to write down how to compute the SoS
-                    #  for localizing matrices to check i.e. what does the resulting PSD variable represent
-                    # to_add.append(np.array(self._problem.get_constraint(self._constraints[f"LMME-{id}-{index}"]).dual))
-                    raise NotImplementedError(
-                        "Getting the multiplier of a localizing matrix equality using the primal isn't supported yet."
+                    to_hermitianize = np.array(
+                        self._problem.get_constraint(self._constraints[f"LMME-{id}-{index}"]).dual
                     )
+                    to_append = (to_hermitianize + to_hermitianize.T.conj()) / 2
                 else:
-                    to_add.append((equality_constraint, np.array(self._problem.get_variable(f"Q_{(id, index)}").value)))
+                    to_append = np.array(self._problem.get_variable(f"Q_{(id, index)}").value)
+
+                if not to_append.shape:  # For 1x1 constraints or variables, Picos returns a 0D array
+                    to_append = to_append.reshape((1, 1))
+
+                to_add.append((equality_constraint, to_append))
 
             res[id] = to_add
 
@@ -127,29 +128,21 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     ]:
         res = {}
 
-        for (
-            id,
-            localizing_moment_matrices_inequalities_id,
-        ) in self._relaxation.localising_moment_matrices_inequalities.items():
+        for id in self._relaxation.localising_moment_matrices_inequalities:
             to_add = []
 
             for index, inequality_constraint in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
-                    to_add.append(
-                        (
-                            inequality_constraint,
-                            np.array(
-                                self._problem.get_constraint(self._constraints[f"LMMI-{id}-{index}"]).lhs.value,
-                            ),
-                        )
+                    to_append = np.array(
+                        self._problem.get_constraint(self._constraints[f"LMMI-{id}-{index}"]).lhs.value
                     )
                 else:
-                    to_add.append(
-                        (
-                            inequality_constraint,
-                            np.array(self._problem.get_constraint(self._constraints[f"P_({id}, {index})"]).dual),
-                        )
-                    )
+                    to_append = np.array(self._problem.get_constraint(self._constraints[f"P_({id}, {index})"]).dual)
+
+                if not to_append.shape:  # For 1x1 constraints or variables, Picos returns a 0D array
+                    to_append = to_append.reshape((1, 1))
+
+                to_add.append((inequality_constraint, to_append))
 
             res[id] = to_add
 
@@ -169,24 +162,19 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     ]:
         res = {}
 
-        for (
-            id,
-            localizing_moment_matrices_inequalities_id,
-        ) in self._relaxation.localising_moment_matrices_inequalities.items():
+        for id in self._relaxation.localising_moment_matrices_inequalities:
             to_add = []
 
             for index, inequality_constraint in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
-                    to_add.append(
-                        (
-                            inequality_constraint,
-                            np.array(self._problem.get_constraint(self._constraints[f"LMMI-{id}-{index}"]).dual),
-                        )
-                    )
+                    to_append = np.array(self._problem.get_constraint(self._constraints[f"LMMI-{id}-{index}"]).dual)
                 else:
-                    to_add.append(
-                        (inequality_constraint, np.array(self._problem.get_variable(f"P_({id}, {index})").value))
-                    )
+                    to_append = np.array(self._problem.get_variable(f"P_({id}, {index})").value)
+
+                if not to_append.shape:  # For 1x1 constraints or variables, Picos returns a 0D array
+                    to_append = to_append.reshape((1, 1))
+
+                to_add.append((inequality_constraint, to_append))
 
             res[id] = to_add
 
