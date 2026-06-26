@@ -47,7 +47,7 @@ macro_rules! build_relaxation_inner {
     (
         $py:expr, $level:expr, $objective:expr,
         $operator_constraints_some:expr, $moment_constraints_some:expr, $normalization_constraints_some:expr,
-        $variables:expr, $substitutions:expr, $strategy:expr,
+        $variables:expr, $extra_monomials:expr, $substitutions:expr, $strategy:expr,
         $py_poly:ident, $py_relaxation:ident, $py_constraint:ident $(,)?
     ) => {{
         let rust_objective = match $py_poly::try_from($objective) {
@@ -152,7 +152,7 @@ macro_rules! build_relaxation_inner {
             }
         }
 
-        let mut relaxation = SdpRelaxation::new($strategy);
+        let mut relaxation = SdpRelaxation::new($strategy, $extra_monomials);
         info!("Setting relaxation.");
         relaxation.set_relaxation(
             $level,
@@ -176,16 +176,30 @@ macro_rules! build_relaxation_arm {
     (
         $py:expr, $level:expr, $objective:expr,
         $operator_constraints_some:expr, $moment_constraints_some:expr, $normalization_constraints_some:expr,
-        $substitutions_some:expr, $substitution_strategy:expr,
+        $extra_monomials_some: expr, $substitutions_some:expr, $substitution_strategy:expr,
         monomials: $py_monomial:ident & $rust_monomial:ty,
         variables: $variables:expr,
         real_poly_and_relaxation: $real_py_poly:ident & $real_py_relaxation:ident & $real_py_constraint:ident,
         complex_poly_and_relaxation: $complex_py_poly:ident & $complex_py_relaxation:ident & $complex_py_constraint:ident,
         is_real: $is_real:expr $(,)?
     ) => {{
-        let mut rust_substitutions: BTreeMap<$rust_monomial, $rust_monomial> = BTreeMap::new();
+        debug!("Converting extra monomials.");
+        let mut rust_extra_monomials: Vec<$rust_monomial> = Vec::with_capacity($extra_monomials_some.len());
+
+        for (index, monom) in $extra_monomials_some.iter().enumerate() {
+            if let Ok(rust_monom) = $py_monomial::try_from(monom) {
+                rust_extra_monomials.push(rust_monom.0);
+            } else {
+                return Err(PyValueError::new_err(format!(
+                    "Couldn't convert extra monomial at index {} to a monomial.",
+                    index
+                )));
+            }
+        }
 
         debug!("Converting substitutions.");
+        let mut rust_substitutions: BTreeMap<$rust_monomial, $rust_monomial> = BTreeMap::new();
+
         for (index, (monom_key, monom_value)) in $substitutions_some.iter().enumerate() {
             let try_rust_monom_key = $py_monomial::try_from(monom_key);
             let try_rust_monom_value = $py_monomial::try_from(monom_value);
@@ -221,6 +235,7 @@ macro_rules! build_relaxation_arm {
                 $moment_constraints_some,
                 $normalization_constraints_some,
                 $variables,
+                rust_extra_monomials,
                 rust_substitutions,
                 $substitution_strategy,
                 $real_py_poly,
@@ -237,6 +252,7 @@ macro_rules! build_relaxation_arm {
                 $moment_constraints_some,
                 $normalization_constraints_some,
                 $variables,
+                rust_extra_monomials,
                 rust_substitutions,
                 $substitution_strategy,
                 $complex_py_poly,
@@ -581,12 +597,13 @@ pub(crate) fn is_constraint_real_valued<'py>(bound: &Bound<'py, PyAny>, name: &s
         normalization_constraints=None,
         substitution_strategy=RewritingStrategy::Greedy,
         assume_real=false,
+        extra_monomials=None
     )
 )]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn get_relaxation<'py>(
     variables: &Bound<'py, PyList>,
-    level: u8,
+    level: i8,
     objective: &Bound<'py, PyAny>,
     substitutions: Option<&Bound<'py, PyDict>>,
     operator_constraints: Option<&Bound<'py, PyList>>,
@@ -594,6 +611,7 @@ pub(crate) fn get_relaxation<'py>(
     normalization_constraints: Option<&Bound<'py, PyList>>,
     substitution_strategy: RewritingStrategy,
     assume_real: bool,
+    extra_monomials: Option<&Bound<'py, PyList>>,
 ) -> PyResult<Py<PyAny>> {
     let py = objective.py();
     let default_dict = PyDict::new(py);
@@ -602,6 +620,7 @@ pub(crate) fn get_relaxation<'py>(
     let operator_constraints_some = operator_constraints.unwrap_or(&default_list);
     let moment_constraints_some = moment_constraints.unwrap_or(&default_list);
     let normalization_constraints_some = normalization_constraints.unwrap_or(&default_list);
+    let extra_monomials_some = extra_monomials.unwrap_or(&default_list);
 
     // We first need to check whether all the constraints are real-valued
     let mut is_problem_real_valued = true;
@@ -654,7 +673,7 @@ pub(crate) fn get_relaxation<'py>(
             build_relaxation_arm!(
                 py, level, objective,
                 operator_constraints_some, moment_constraints_some, normalization_constraints_some,
-                substitutions_some, substitution_strategy,
+                extra_monomials_some, substitutions_some, substitution_strategy,
                 monomials: PythonNonCommutativeMonomial & RustNonCommutativeMonomial,
                 variables: noncommutative_variables,
                 real_poly_and_relaxation: PythonRealCoefficientsNonCommutativePolynomial &
@@ -671,7 +690,7 @@ pub(crate) fn get_relaxation<'py>(
             build_relaxation_arm!(
                 py, level, objective,
                 operator_constraints_some, moment_constraints_some, normalization_constraints_some,
-                substitutions_some, substitution_strategy,
+                extra_monomials_some, substitutions_some, substitution_strategy,
                 monomials: PythonCommutativeMonomial & RustCommutativeMonomial,
                 variables: commutative_variables,
                 real_poly_and_relaxation: PythonRealCoefficientsCommutativePolynomial &
@@ -702,6 +721,7 @@ pub(super) struct SdpRelaxation<MonomialType: AdjointTrait + Ord, Scalar: Polyno
     generating_sets: BTreeMap<u8, Vec<MonomialType>>,
     localising_moment_matrices_equalities: BTreeMap<u8, Vec<RustMomentMatrix<Scalar, MonomialType>>>,
     localising_moment_matrices_inequalities: BTreeMap<u8, Vec<RustMomentMatrix<Scalar, MonomialType>>>,
+    extra_monomials: Vec<MonomialType>,
 }
 
 // Commutative type aliases
@@ -787,7 +807,7 @@ where
     for<'a> Polynomial<Monomial<Data>, Scalar>:
         Mul<&'a Monomial<Data>, Output = Result<Polynomial<Monomial<Data>, Scalar>, String>>,
 {
-    pub(super) fn new(substitution_strategy: RewritingStrategy) -> Self {
+    pub(super) fn new(substitution_strategy: RewritingStrategy, extra_monomials: Vec<Monomial<Data>>) -> Self {
         Self {
             objective: Polynomial::zero(),
             substitutions: BTreeMap::new(),
@@ -800,13 +820,14 @@ where
             generating_sets: BTreeMap::new(),
             localising_moment_matrices_equalities: BTreeMap::new(),
             localising_moment_matrices_inequalities: BTreeMap::new(),
+            extra_monomials,
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     fn set_relaxation<OperatorType: Copy + Ord + AdjointTrait + Display + HasAMomentMatrixId>(
         &mut self,
-        level: u8,
+        level: i8,
         variables: Vec<OperatorType>,
         objective: Polynomial<Monomial<Data>, Scalar>,
         substitutions: BTreeMap<Monomial<Data>, Monomial<Data>>,
@@ -821,6 +842,13 @@ where
         Monomial<Data>: From<OperatorType> + RewritingTrait<Monomial<Data>> + Display,
         Polynomial<Monomial<Data>, Scalar>: RewritingTrait<Monomial<Data>> + Display,
     {
+        if level < -1 {
+            return Err(PyValueError::new_err(format!(
+                "level must be larger than or equal to -1 but {} was given.",
+                level
+            )));
+        }
+
         let mut variables_with_adjoint = BTreeMap::new();
 
         for variable in variables {
@@ -907,7 +935,7 @@ where
             }
         }
         for &k in variables_with_adjoint.keys() {
-            if !covered_indices.contains(&k) {
+            if !covered_indices.contains(&k) & (level > -1) {
                 debug!("Setting default normalization constraint for the moment matrix at index {}.", k);
                 normalization_equalities
                     .push((Polynomial::from(<Monomial<Data> as OneWithMomentMatrixId>::one(k)), Scalar::one()));
@@ -957,8 +985,11 @@ where
             // The i-th element of monomials_sets contains the set of monomials of length i + 1
             // This allows us to access the monomials for lower k_i when dealing with
             // localizing moment matrices
-            let mut monomials_sets = Vec::with_capacity(1 + level as usize);
-            monomials_sets.push(BTreeSet::from([Monomial::one(moment_matrix_id)]));
+            let mut monomials_sets = Vec::with_capacity((1 + level) as usize);
+
+            if level >= 0 {
+                monomials_sets.push(BTreeSet::from([Monomial::one(moment_matrix_id)]));
+            }
 
             // Generating the monomials set by finding which monomials can be reduced
             // FIXME: if the monomials are commutative, we can instead loop over the possible powers of
@@ -996,14 +1027,20 @@ where
             }
 
             let is_problem_real_valued = self.objective.is_real();
-            let mut new_moment_matrix =
-                RustMomentMatrix { data: BTreeMap::new(), size: monomials_sets.iter().map(|set| set.len()).sum() };
+            let mut new_moment_matrix = RustMomentMatrix {
+                data: BTreeMap::new(),
+                size: monomials_sets.iter().map(|set| set.len()).sum::<usize>() + self.extra_monomials.len(),
+            };
 
             // Determine the constraints on the moment matrix. This is where we build the map between
             // reduced monomials and indices within the moment matrix
-            for (index_row, monomial_row) in monomials_sets.iter().flatten().enumerate() {
+            for (index_row, monomial_row) in
+                monomials_sets.iter().flatten().chain(self.extra_monomials.iter()).enumerate()
+            {
                 // FIXME: using skip probably makes it run in n^2 instead of n*(n+1)/2
-                for (index_column, monomial_column) in monomials_sets.iter().flatten().enumerate().skip(index_row) {
+                for (index_column, monomial_column) in
+                    monomials_sets.iter().flatten().chain(self.extra_monomials.iter()).enumerate().skip(index_row)
+                {
                     let new_monomial = if index_row == 0 {
                         monomial_column.clone()
                     } else {
@@ -1061,7 +1098,7 @@ where
                 for equality in equalities.iter() {
                     new_localising_moment_matrices_equalities.push(self.get_localising_moment_matrix(
                         equality,
-                        (2 * level - equality.degree()) / 2,
+                        (2 * level - equality.degree() as i8) / 2,
                         &monomials_sets,
                         &new_moment_matrix,
                     )?);
@@ -1076,7 +1113,7 @@ where
                 for inequality in inequalities.iter() {
                     new_localising_moment_matrices_inequalities.push(self.get_localising_moment_matrix(
                         inequality,
-                        (2 * level - inequality.degree()) / 2,
+                        (2 * level - inequality.degree() as i8) / 2,
                         &monomials_sets,
                         &new_moment_matrix,
                     )?);
@@ -1097,7 +1134,7 @@ where
     fn get_localising_moment_matrix(
         &self,
         polynomial: &Polynomial<Monomial<Data>, Scalar>,
-        level: u8,
+        level: i8,
         monomials_sets: &[BTreeSet<Monomial<Data>>],
         moment_matrix: &RustMomentMatrix<Scalar, Monomial<Data>>,
     ) -> PyResult<RustMomentMatrix<Scalar, Monomial<Data>>>
@@ -1107,13 +1144,21 @@ where
     {
         let mut new_localising_moment_matrix = RustMomentMatrix {
             data: BTreeMap::new(),
-            size: monomials_sets.iter().take((level + 1).into()).map(|set| set.len()).sum(),
+            size: monomials_sets.iter().take((level + 1) as usize).map(|set| set.len()).sum::<usize>()
+                + self.extra_monomials.len(),
         };
 
-        for (index_row, operator_row) in monomials_sets.iter().take((level + 1).into()).flatten().enumerate() {
+        for (index_row, operator_row) in
+            monomials_sets.iter().take((level + 1) as usize).flatten().chain(self.extra_monomials.iter()).enumerate()
+        {
             // FIXME: using skip is suboptimal, since it still traverses the iterator
-            for (index_col, operator_col) in
-                monomials_sets.iter().take((level + 1).into()).flatten().enumerate().skip(index_row)
+            for (index_col, operator_col) in monomials_sets
+                .iter()
+                .take((level + 1) as usize)
+                .flatten()
+                .chain(self.extra_monomials.iter())
+                .enumerate()
+                .skip(index_row)
             {
                 // FIXME: performance: no need to recompute the adjoint each time
                 let operator_row_adjoint = operator_row.adjoint();
