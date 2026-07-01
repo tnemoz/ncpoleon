@@ -6,13 +6,6 @@ from typing import TYPE_CHECKING, Any, overload
 import numpy as np
 from scipy.sparse import coo_matrix
 
-from ncpoleon.relaxations import (
-    ComplexValuedCommutativeSdpRelaxation,
-    ComplexValuedNonCommutativeSdpRelaxation,
-    RealValuedCommutativeSdpRelaxation,
-    RealValuedNonCommutativeSdpRelaxation,
-)
-
 try:
     import picos as pc
 
@@ -22,16 +15,17 @@ except ImportError:
     if TYPE_CHECKING:
         import picos as pc
 
-if TYPE_CHECKING:
-    from ncpoleon.polynomials import _Scalar
+from ncpoleon._typing import PolynomialElements, Scalar
 
+if TYPE_CHECKING:
+    from ncpoleon.relaxations import BaseSdpRelaxation
 
 logger = logging.getLogger(__name__)
 
 
 @overload
 def convert_row_col_data_to_coo_matrix(
-    position_matrix: tuple[list[int], list[int], list[_Scalar]], size: int
+    position_matrix: tuple[list[int], list[int], list[Scalar]], size: int
 ) -> coo_matrix: ...
 
 
@@ -40,7 +34,7 @@ def convert_row_col_data_to_coo_matrix(position_matrix: None, size: int) -> None
 
 
 def convert_row_col_data_to_coo_matrix(
-    position_matrix: tuple[list[int], list[int], list[_Scalar]] | None, size: int
+    position_matrix: tuple[list[int], list[int], list[Scalar]] | None, size: int
 ) -> coo_matrix | None:
     if position_matrix is None:
         return None
@@ -51,15 +45,12 @@ def convert_row_col_data_to_coo_matrix(
 
 
 def to_picos(
-    sdp: RealValuedCommutativeSdpRelaxation
-    | ComplexValuedCommutativeSdpRelaxation
-    | RealValuedNonCommutativeSdpRelaxation
-    | ComplexValuedNonCommutativeSdpRelaxation,
+    sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
     objective_direction: str,
     *,
     primal: bool,
     **problem_kwargs: Any,
-) -> pc.modeling.Problem:
+) -> tuple[pc.modeling.Problem, dict[str, pc.Constraint]]:
     r"""Export a relaxation to PICOS.
 
     :param sdp: The relaxation to be converted to PICOS, generated with :func:`~ncpoleon.relaxations.get_relaxation`.
@@ -68,7 +59,8 @@ def to_picos(
     :param primal: If `True`, then the problem is exported in its primal form. Otherwise, it is exported in its dual
         form.
     :param \**problem_kwargs: Any additional keyword arguments to be passed to :class:`picos.Problem` at instantiation.
-    :return: A :class:`picos.Problem` object corresponding to the problem the user has specified.
+    :return: A :class:`picos.Problem` object corresponding to the problem the user has specified and a dictionary of
+        Constraints to get their dual values later on.
     """
     if not _picos_available:
         raise ImportError("picos is required for to_picos but is not installed. Install it with: pip install picos")
@@ -78,6 +70,7 @@ def to_picos(
         )
 
     problem = pc.Problem(**problem_kwargs)
+    constraints = {}
 
     if primal:
         logger.info("Exporting to a primal PICOS problem.")
@@ -103,11 +96,11 @@ def to_picos(
                 mon * pos_matrix + (0 if pos_matrix_conj is None else mon.conj() * pos_matrix_conj)
                 for mon, (pos_matrix, pos_matrix_conj) in mapped_moment_matrix.items()
             )
-            problem.add_constraint(G >> 0)
+            constraints[f"MM-{moment_matrix_id}"] = problem.add_constraint(G >> 0)
             logger.debug(f"Added moment matrix PSD constraint for moment matrix id {moment_matrix_id}.")
 
         for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
-            for equality_moment_matrix in equality_moment_matrices:
+            for index, equality_moment_matrix in enumerate(equality_moment_matrices):
                 new_localising_matrix = pc.sum(
                     mapped_variables[mon] * convert_row_col_data_to_coo_matrix(pos_matrix, equality_moment_matrix.size)
                     + (
@@ -118,11 +111,11 @@ def to_picos(
                     )
                     for mon, (pos_matrix, pos_matrix_conj) in equality_moment_matrix.as_row_col_data_format().items()
                 )
-                problem.add_constraint(new_localising_matrix == 0)
+                constraints[f"LMME-{moment_matrix_id}-{index}"] = problem.add_constraint(new_localising_matrix == 0)
                 logger.debug(f"Added constraint {new_localising_matrix} == 0 for moment matrix id {moment_matrix_id}.")
 
         for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
-            for inequality_moment_matrix in inequality_moment_matrices:
+            for index, inequality_moment_matrix in enumerate(inequality_moment_matrices):
                 new_localising_matrix = pc.sum(
                     mapped_variables[mon]
                     * convert_row_col_data_to_coo_matrix(pos_matrix, inequality_moment_matrix.size)
@@ -134,21 +127,23 @@ def to_picos(
                     )
                     for mon, (pos_matrix, pos_matrix_conj) in inequality_moment_matrix.as_row_col_data_format().items()
                 )
-                problem.add_constraint(new_localising_matrix >> 0)
+                constraints[f"LMMI-{moment_matrix_id}-{index}"] = problem.add_constraint(new_localising_matrix >> 0)
                 logger.debug(f"Added constraint {new_localising_matrix} ≽ 0 for moment matrix id {moment_matrix_id}.")
 
         # FIXME: We should instead pass the mapped variables to the relaxation, which could then return all the moment
-        #  at once. That would reduce conversion costs and potentially allow to add logging for individual constraints
-        problem.add_list_of_constraints(
-            sdp.change_variables(poly, mapped_variables) == value for poly, value in sdp.moment_equalities
-        )
-        problem.add_list_of_constraints(
-            sdp.change_variables(poly, mapped_variables) >= value for poly, value in sdp.moment_inequalities
-        )
+        #  at once. That would reduce conversion costs
+
+        for index, (poly, value) in enumerate(sdp.moment_equalities):
+            constraints[f"ME-{index}"] = problem.add_constraint(sdp.change_variables(poly, mapped_variables) == value)
+            logger.debug(f"Added moment constraint {poly} == {value} for moment matrix id {moment_matrix_id}.")
+
+        for index, (poly, value) in enumerate(sdp.moment_inequalities):
+            constraints[f"MI-{index}"] = problem.add_constraint(sdp.change_variables(poly, mapped_variables) >= value)
+            logger.debug(f"Added moment constraint {poly} >= {value} for moment matrix id {moment_matrix_id}.")
 
         problem.set_objective(objective_direction, sdp.change_variables(sdp.objective, mapped_variables))
     else:
-        logger.info("Exporting to a dual MOSEK problem.")
+        logger.info("Exporting to a dual Picos problem.")
 
         is_problem_real_valued = sdp.is_real
         operator_inequalities = sdp.localising_moment_matrices_inequalities
@@ -193,31 +188,33 @@ def to_picos(
         variable_builder = pc.SymmetricVariable if is_problem_real_valued else pc.HermitianVariable
 
         for moment_matrix_index, moment_matrix in sdp.moment_matrices.items():
-            Y = variable_builder(f"Y_{moment_matrix_index}", (moment_matrix.size, moment_matrix.size))
-            problem.add_constraint(Y >> 0)
+            Y = variable_builder(f"Y_{moment_matrix_index}", moment_matrix.size)
+            constraints[f"Y_{moment_matrix_index}"] = problem.add_constraint(Y >> 0)
             logger.debug(f"Added PSD variable Y_{moment_matrix_index} of size {moment_matrix.size}.")
 
-            Ps = [
-                variable_builder(
-                    f"P_{(moment_matrix_index, inequality_index)}",
-                    (inequality_localizing_matrix.size, inequality_localizing_matrix.size),
-                )
-                for inequality_index, inequality_localizing_matrix in enumerate(
-                    operator_inequalities[moment_matrix_index]
-                )
-            ]
-            problem.add_list_of_constraints(P >> 0 for P in Ps)
-            logger.debug(f"Added {len(Ps)} PSD variable(s) P_* for moment matrix {moment_matrix_index}.")
+            Ps = []
 
-            Qs = [
-                variable_builder(
-                    f"Q_{(moment_matrix_index, equality_index)}",
-                    (equality_localizing_matrix.size, equality_localizing_matrix.size),
+            for inequality_index, inequality_localizing_matrix in enumerate(operator_inequalities[moment_matrix_index]):
+                Ps.append(
+                    variable_builder(
+                        f"P_{(moment_matrix_index, inequality_index)}",
+                        inequality_localizing_matrix.size,
+                    )
                 )
-                for equality_index, equality_localizing_matrix in enumerate(operator_equalities[moment_matrix_index])
-            ]
+                constraints[f"P_{(moment_matrix_index, inequality_index)}"] = problem.add_constraint(Ps[-1] >> 0)
+                logger.debug(f"Added PSD variable(s) P_{(moment_matrix_index, inequality_index)}.")
 
-            logger.debug(f"Added {len(Qs)} free Hermitian variable Q_* for moment matrix {moment_matrix_index}.")
+            Qs = []
+
+            for equality_index, equality_localizing_matrix in enumerate(operator_equalities[moment_matrix_index]):
+                Qs.append(
+                    variable_builder(
+                        f"Q_{(moment_matrix_index, equality_index)}",
+                        equality_localizing_matrix.size,
+                    )
+                )
+
+                logger.debug(f"Added Hermitian variable Q_{(moment_matrix_index, equality_index)}.")
 
             # Precompute localizing matrix row-col formats outside the monomial loop.
             localizing_row_cols = [
@@ -257,7 +254,12 @@ def to_picos(
 
                     # beta_re can only be None if the monomial isn't present in the moment inequality constraint
                     if beta_re is not None:
-                        new_constraint += lambda_m * (beta_re - minus_beta_im * 1j)
+                        if is_problem_real_valued or pos_matrix_conj is None:
+                            assert minus_beta_im is None
+                            new_constraint += lambda_m * beta_re
+                        else:
+                            assert minus_beta_im is not None
+                            new_constraint += lambda_m * (beta_re - minus_beta_im * 1j)
 
                 for nu_n, ((poly_re, poly_im), _) in zip(nus, split_moment_equalities):
                     if pos_matrix_conj is None:
@@ -275,15 +277,17 @@ def to_picos(
 
                         if poly_im is not None:
                             delta_plus_eps_im, delta_minus_eps_re = poly_im.get(monomial, (0.0, None))
-                        else:
                             delta_minus_eps_re = 0.0 if delta_minus_eps_re is None else delta_minus_eps_re
+                        else:
+                            delta_plus_eps_im, delta_minus_eps_re = 0.0, 0.0
 
                         delta_plus_eps = delta_plus_eps_re + delta_plus_eps_im * 1j
                         delta_minus_eps = delta_minus_eps_re - minus_delta_minus_eps_im * 1j
                         delta = (delta_plus_eps + delta_minus_eps) / 2
                         eps = (delta_plus_eps - delta_minus_eps) / 2
 
-                        new_constraint += nu_n.conj * delta + nu_n * eps.conjugate()
+                        if delta != 0 or eps != 0:
+                            new_constraint += nu_n.conj * delta + nu_n * eps.conjugate()
 
                 alpha_re, alpha_im = split_objective_re.get(monomial, (0.0, None))
 
@@ -293,11 +297,11 @@ def to_picos(
                 alpha = alpha_re + alpha_im * 1j
 
                 if objective_direction == "min":
-                    problem.add_constraint(new_constraint == alpha)
+                    constraints[f"M-{monomial}"] = problem.add_constraint(new_constraint == alpha)
                 else:
-                    problem.add_constraint(new_constraint == -alpha)
+                    constraints[f"M-{monomial}"] = problem.add_constraint(new_constraint == -alpha)
 
                 logger.debug(f"Added dual constraint for monomial {monomial}.")
 
     logger.info("PICOS problem created.")
-    return problem
+    return problem, constraints

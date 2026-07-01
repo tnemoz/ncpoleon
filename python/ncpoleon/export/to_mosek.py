@@ -16,16 +16,10 @@ except ImportError:
     if TYPE_CHECKING:
         from mosek.fusion import Expr, ExprMulScalarConst, Matrix, Model, PSDVariable, SparseMatrix
 
+from ncpoleon._typing import PolynomialElements, Scalar
+
 if TYPE_CHECKING:
-    from ncpoleon.polynomials.commutative_polynomials import CommutativeMonomial
-    from ncpoleon.polynomials.noncommutative_polynomials import NonCommutativeMonomial
-    from ncpoleon.relaxations import (
-        ComplexValuedCommutativeSdpRelaxation,
-        ComplexValuedNonCommutativeSdpRelaxation,
-        MomentMatrix,
-        RealValuedCommutativeSdpRelaxation,
-        RealValuedNonCommutativeSdpRelaxation,
-    )
+    from ncpoleon.relaxations import BaseSdpRelaxation, MomentMatrix
 
 
 logger = logging.getLogger(__name__)
@@ -89,8 +83,8 @@ def convert_row_col_data_to_mosek_hermitian_matrix(
 
 
 def rust_moment_matrix_to_mosek(
-    moment_matrix: MomentMatrix[CommutativeMonomial | NonCommutativeMonomial, float | complex],
-    mapped_variables: dict[CommutativeMonomial | NonCommutativeMonomial, Expr | _ComplexExpr],
+    moment_matrix: MomentMatrix[PolynomialElements, Scalar],
+    mapped_variables: dict[PolynomialElements, Expr | _ComplexExpr],
     matrix_builder: Callable[[tuple[list[int], list[int], list[complex]] | None, int], Matrix | None],
 ) -> Matrix:
     mosek_moment_matrix_re = 0
@@ -161,10 +155,7 @@ def mosek_antihermitianize(M_re: SparseMatrix, M_im: SparseMatrix) -> ExprMulSca
 #  provides the function with what's a real variable, a complex one, a symmetric one, a hermitian one, and such
 #  that the variables can be multiplied together, be taken the trace of, etc.
 def to_mosek(
-    sdp: RealValuedCommutativeSdpRelaxation
-    | ComplexValuedCommutativeSdpRelaxation
-    | RealValuedNonCommutativeSdpRelaxation
-    | ComplexValuedNonCommutativeSdpRelaxation,
+    sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
     objective_direction: str,
     *,
     primal: bool,
@@ -181,7 +172,10 @@ def to_mosek(
     :return: A :class:`mosek.Model` object corresponding to the problem the user has specified.
     """
     if not _mosek_available:
-        raise ImportError("mosek is required for to_mosek but is not installed. Install it with: pip install mosek")
+        raise ImportError(
+            "mosek is required for to_mosek but is not installed. Install it with: pip install mosek. Note that a MOSEK"
+            " license is required to use MOSEK."
+        )
     if objective_direction not in ["min", "max"]:
         raise ValueError(
             f"The only supported objective directions are min and max, but {objective_direction} was provided."
@@ -204,7 +198,7 @@ def to_mosek(
         )
 
         for moment_matrix_id, moment_matrix in sdp.moment_matrices.items():
-            for monomial, (position_matrix, position_matrix_conj) in moment_matrix.as_row_col_data_format().items():
+            for monomial, (_position_matrix, position_matrix_conj) in moment_matrix.as_row_col_data_format().items():
                 new_variable = (
                     M.variable(str(monomial), Domain.unbounded())
                     if position_matrix_conj is None
@@ -217,49 +211,55 @@ def to_mosek(
                 mapped_variables[monomial] = new_variable
 
             mosek_moment_matrix = rust_moment_matrix_to_mosek(moment_matrix, mapped_variables, matrix_builder)
-            M.constraint(mosek_moment_matrix, Domain.inPSDCone(mosek_moment_matrix.getShape()[0]))
+            M.constraint(
+                f"MM-{moment_matrix_id}", mosek_moment_matrix, Domain.inPSDCone(mosek_moment_matrix.getShape()[0])
+            )
             logger.debug(f"Added moment matrix PSD constraint for moment matrix id {moment_matrix_id}.")
 
         for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
-            for equality_moment_matrix in equality_moment_matrices:
+            for index, equality_moment_matrix in enumerate(equality_moment_matrices):
                 mosek_new_localising_matrix = rust_moment_matrix_to_mosek(
                     equality_moment_matrix, mapped_variables, matrix_builder
                 )
-                M.constraint(mosek_new_localising_matrix, Domain.equalsTo(0))
+                M.constraint(f"LMME-{moment_matrix_id}-{index}", mosek_new_localising_matrix, Domain.equalsTo(0))
                 logger.debug(
                     f"Added constraint {mosek_new_localising_matrix} == 0 for moment matrix id {moment_matrix_id}."
                 )
 
         for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
-            for inequality_moment_matrix in inequality_moment_matrices:
+            for index, inequality_moment_matrix in enumerate(inequality_moment_matrices):
                 mosek_new_localising_matrix = rust_moment_matrix_to_mosek(
                     inequality_moment_matrix, mapped_variables, matrix_builder
                 )
-                M.constraint(mosek_new_localising_matrix, Domain.inPSDCone(mosek_new_localising_matrix.getShape()[0]))
+                M.constraint(
+                    f"LMMI-{moment_matrix_id}-{index}",
+                    mosek_new_localising_matrix,
+                    Domain.inPSDCone(mosek_new_localising_matrix.getShape()[0]),
+                )
                 logger.debug(
                     f"Added constraint {mosek_new_localising_matrix} ≽ 0 for moment matrix id {moment_matrix_id}."
                 )
 
-        for poly, value in sdp.moment_equalities:
+        for index, (poly, value) in enumerate(sdp.moment_equalities):
             changed = sdp.change_variables(poly, mapped_variables)
 
             if isinstance(changed, _ComplexExpr):
-                M.constraint(changed.real, Domain.equalsTo(value.real))
+                M.constraint(f"ME-{index}_re", changed.real, Domain.equalsTo(value.real))
                 logger.debug(f"Added constraint {changed.real} == {value.real}.")
-                M.constraint(changed.imag, Domain.equalsTo(value.imag))
+                M.constraint(f"ME-{index}_im", changed.imag, Domain.equalsTo(value.imag))
                 logger.debug(f"Added constraint {changed.imag} == {value.imag}.")
             else:
-                M.constraint(changed, Domain.equalsTo(value))
+                M.constraint(f"ME-{index}", changed, Domain.equalsTo(value))
                 logger.debug(f"Added constraint {changed} == {value}.")
 
-        for poly, value in sdp.moment_inequalities:
+        for index, (poly, value) in enumerate(sdp.moment_inequalities):
             changed = sdp.change_variables(poly, mapped_variables)
 
             if isinstance(changed, _ComplexExpr):
-                M.constraint(changed.real, Domain.equalsTo(value))
+                M.constraint(f"MI-{index}", changed.real, Domain.greaterThan(value))
                 logger.debug(f"Added constraint {changed.real} >= {value}.")
             else:
-                M.constraint(changed, Domain.greaterThan(value))
+                M.constraint(f"MI-{index}", changed, Domain.greaterThan(value))
                 logger.debug(f"Added constraint {changed} >= {value}.")
 
         objective = sdp.change_variables(sdp.objective, mapped_variables)
@@ -422,6 +422,7 @@ def to_mosek(
                             assert minus_beta_im is None
                             new_constraint = Expr.add(new_constraint, Expr.mul(lambda_m, beta_re))
                         else:
+                            assert minus_beta_im is not None
                             new_constraint_re = Expr.add(new_constraint_re, Expr.mul(Expr.mul(lambda_m, beta_re), 2.0))
                             new_constraint_im = Expr.add(
                                 new_constraint_im, Expr.mul(Expr.mul(lambda_m, minus_beta_im), 2.0)
@@ -465,20 +466,20 @@ def to_mosek(
                     if is_problem_real_valued:
                         assert alpha_im is None
                     if objective_direction == "min":
-                        M.constraint(new_constraint, Domain.equalsTo(alpha_re))
+                        M.constraint(f"M-{monomial}", new_constraint, Domain.equalsTo(alpha_re))
                     else:
-                        M.constraint(new_constraint, Domain.equalsTo(-alpha_re))
+                        M.constraint(f"M-{monomial}", new_constraint, Domain.equalsTo(-alpha_re))
 
                     logger.debug(f"Added dual constraint for monomial {monomial}.")
                 else:
                     alpha_im = 0.0 if alpha_im is None else alpha_im
 
                     if objective_direction == "min":
-                        M.constraint(new_constraint_re, Domain.equalsTo(2 * alpha_re))
-                        M.constraint(new_constraint_im, Domain.equalsTo(2 * alpha_im))
+                        M.constraint(f"M-{monomial}-re", new_constraint_re, Domain.equalsTo(2 * alpha_re))
+                        M.constraint(f"M-{monomial}-im", new_constraint_im, Domain.equalsTo(2 * alpha_im))
                     else:
-                        M.constraint(new_constraint_re, Domain.equalsTo(-2 * alpha_re))
-                        M.constraint(new_constraint_im, Domain.equalsTo(-2 * alpha_im))
+                        M.constraint(f"M-{monomial}-re", new_constraint_re, Domain.equalsTo(-2 * alpha_re))
+                        M.constraint(f"M-{monomial}-im", new_constraint_im, Domain.equalsTo(-2 * alpha_im))
 
                     logger.debug(f"Added dual constraints for monomial {monomial}.")
 

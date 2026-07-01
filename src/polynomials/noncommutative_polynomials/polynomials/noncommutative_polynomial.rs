@@ -366,6 +366,10 @@ impl PythonRealCoefficientsNonCommutativePolynomial {
             .collect()
     }
 
+    fn by_moment_matrix_id(&self) -> BTreeMap<u8, Self> {
+        self.0.by_moment_matrix_id().into_iter().map(|(mm_id, poly)| (mm_id, Self(poly))).collect()
+    }
+
     #[getter]
     fn is_real(&self) -> bool {
         true
@@ -515,6 +519,13 @@ impl PythonRealCoefficientsNonCommutativePolynomial {
         Self(self.0.adjoint())
     }
 
+    /// Check if this polynomial is nil. Additionally chop it using its chop method beforehand if
+    /// the delta parameter is specified
+    #[pyo3(signature=(delta=None))]
+    fn is_zero(&self, delta: Option<f64>) -> bool {
+        if let Some(delta) = delta { self.0.chop(delta).data.is_empty() } else { self.0.data.is_empty() }
+    }
+
     /// Return a polynomial identical to the one this method has been called with, at the exception
     /// that coefficients whose absolute value is below `delta` are removed.
     #[pyo3(signature=(delta=1e-10))]
@@ -579,6 +590,10 @@ impl PythonComplexCoefficientsNonCommutativePolynomial {
             .iter()
             .map(|(rust_monomial, &coeff)| (PythonNonCommutativeMonomial(rust_monomial.clone()), coeff))
             .collect()
+    }
+
+    fn by_moment_matrix_id(&self) -> BTreeMap<u8, Self> {
+        self.0.by_moment_matrix_id().into_iter().map(|(mm_id, poly)| (mm_id, Self(poly))).collect()
     }
 
     #[getter]
@@ -730,6 +745,13 @@ impl PythonComplexCoefficientsNonCommutativePolynomial {
     #[pyo3(signature=(delta=1e-10))]
     pub(crate) fn chop(&self, delta: f64) -> Self {
         Self(self.0.chop(delta))
+    }
+
+    /// Check if this polynomial is nil. Additionally chop it using its chop method beforehand if
+    /// the delta parameter is specified
+    #[pyo3(signature=(delta=None))]
+    fn is_zero(&self, delta: Option<f64>) -> bool {
+        if let Some(delta) = delta { self.0.chop(delta).data.is_empty() } else { self.0.data.is_empty() }
     }
 
     fn __eq__<'py>(&self, other: &Bound<'py, PyAny>) -> PyResult<Py<PyAny>> {

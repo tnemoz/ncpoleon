@@ -1,43 +1,54 @@
 from math import sqrt
 
 import pytest
-from ncpoleon import generate_commutative_variables, get_relaxation
-from ncpoleon.export import to_mosek, to_picos
+from ncpoleon import generate_commutative_variables, get_relaxation, solve
 from ncpoleon.utils import is_mosek_available
+
+from .utils import reduce_sos_decomposition
 
 # TODO: Add complex-valued tests, tests for the attributes of the relaxations such that the equality constraints or the
 # monomial index
 
 
 def generate_simple_commutative_parameters():
-    for export in ["picos", "mosek"]:
+    for solver in ["picos-cvxopt", "mosek"]:
         for level, expected in [(1, -0.5), (2, 1 - sqrt(2))]:
-            marks = []
-
-            if export == "mosek":
-                marks.append(
-                    pytest.mark.skipif(
-                        not is_mosek_available(), reason="Mosek is not installed or a Mosek license is not available."
-                    )
+            if solver == "mosek":
+                yield pytest.param(
+                    solver,
+                    level,
+                    expected,
+                    marks=[
+                        pytest.mark.skipif(
+                            not is_mosek_available(),
+                            reason="Mosek is not installed or a Mosek license is not available.",
+                        )
+                    ],
                 )
 
-            yield pytest.param(export, level, expected, marks=marks)
+            elif solver == "picos-cvxopt":
+                yield pytest.param(solver, level, expected)
 
 
-@pytest.mark.parametrize("export, level, expected", generate_simple_commutative_parameters())
-def test_simple_real_commutative_problem(export: str, level: int, expected: float):
+def _simple_commutative_params():
     x0 = generate_commutative_variables("x", 1, projector=True)[0]
     x1 = generate_commutative_variables("x", 1, real=True, starting_index=1)[0]
     obj = 2 * x0 * x1
     operator_constraints = [-(x1**2) + x1 + 1 / 4 >= 0]
+    return x0, x1, obj, operator_constraints
 
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_simple_real_commutative_problem_relaxation(benchmark, level):
+    x0, x1, obj, operator_constraints = _simple_commutative_params()
+    benchmark(get_relaxation, [x0, x1], level, obj, operator_constraints=operator_constraints)
+
+
+@pytest.mark.parametrize("solver, level, expected", generate_simple_commutative_parameters())
+@pytest.mark.parametrize("force_primal", [True, False])
+def test_simple_real_commutative_problem(benchmark, solver: str, level: int, expected: float, force_primal: bool):
+    x0, x1, obj, operator_constraints = _simple_commutative_params()
     sdp = get_relaxation([x0, x1], level, obj, operator_constraints=operator_constraints)
-
-    if export == "picos":
-        problem = to_picos(sdp, "min", primal=True, verbosity=0)
-        problem.solve()
-        assert problem.value == pytest.approx(expected)
-    elif export == "mosek":
-        problem = to_mosek(sdp, "min", primal=True)
-        problem.solve()
-        assert problem.primalObjValue() == pytest.approx(expected)
+    sol = benchmark(solve, sdp, "min", force_primal=force_primal, solver=solver)
+    assert sol.value == pytest.approx(expected)
+    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) - obj)).is_zero(1e-7)

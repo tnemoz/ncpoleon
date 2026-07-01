@@ -1,87 +1,138 @@
 from typing import Generic, Literal, TypeAlias, overload
 
-from ncpoleon.polynomials import RewritingStrategy, _Polynomial, _PolynomialElements, _Scalar
+__all__ = [
+    "get_relaxation",
+    "RealCoefficientsCommutativeConstraint",
+    "ComplexCoefficientsCommutativeConstraint",
+    "RealCoefficientsNonCommutativeConstraint",
+    "ComplexCoefficientsNonCommutativeConstraint",
+    "RealValuedCommutativeMomentMatrix",
+    "ComplexValuedCommutativeMomentMatrix",
+    "RealValuedNonCommutativeMomentMatrix",
+    "ComplexValuedNonCommutativeMomentMatrix",
+    "RealValuedCommutativeSdpRelaxation",
+    "ComplexValuedCommutativeSdpRelaxation",
+    "RealValuedNonCommutativeSdpRelaxation",
+    "ComplexValuedNonCommutativeSdpRelaxation",
+]
+
+from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon.polynomials import Polynomial, RewritingStrategy, VectorSpaceElement
 from ncpoleon.polynomials.commutative_polynomials import (
     CommutativeOperator,
+    CommutativePolynomialElement,
     ComplexCoefficientsCommutativePolynomial,
     RealCoefficientsCommutativePolynomial,
-    _CommutativePolynomialElement,
 )
 from ncpoleon.polynomials.noncommutative_polynomials import (
     ComplexCoefficientsNonCommutativePolynomial,
     NonCommutativeOperator,
+    NonCommutativePolynomialElement,
     RealCoefficientsNonCommutativePolynomial,
-    _NonCommutativePolynomialElement,
 )
 
-class _Constraint(Generic[_PolynomialElements, _Scalar]):
+class Constraint(Generic[PolynomialElements, Scalar]):
     @property
     def is_equality(self) -> bool: ...
     @property
     def is_inequality(self) -> bool: ...
     @property
-    def lhs(self) -> _Polynomial[_PolynomialElements, _Scalar] | _Scalar: ...
+    def lhs(self) -> Polynomial[PolynomialElements, Scalar] | Scalar: ...
     @property
-    def rhs(self) -> _Polynomial[_PolynomialElements, _Scalar] | _Scalar: ...
+    def rhs(self) -> Polynomial[PolynomialElements, Scalar] | Scalar: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
-RealCoefficientsCommutativeConstraint: TypeAlias = _Constraint[_CommutativePolynomialElement, float]
-ComplexCoefficientsCommutativeConstraint: TypeAlias = _Constraint[_CommutativePolynomialElement, complex]
-RealCoefficientsNonCommutativeConstraint: TypeAlias = _Constraint[_NonCommutativePolynomialElement, float]
-ComplexCoefficientsNonCommutativeConstraint: TypeAlias = _Constraint[_NonCommutativePolynomialElement, complex]
+RealCoefficientsCommutativeConstraint: TypeAlias = Constraint[CommutativePolynomialElement, float]
+ComplexCoefficientsCommutativeConstraint: TypeAlias = Constraint[CommutativePolynomialElement, complex]
+RealCoefficientsNonCommutativeConstraint: TypeAlias = Constraint[NonCommutativePolynomialElement, float]
+ComplexCoefficientsNonCommutativeConstraint: TypeAlias = Constraint[NonCommutativePolynomialElement, complex]
 
-_PositionMatrixRowColDataFormat = tuple[list[int], list[int], list[_Scalar]]
+PositionMatrixRowColDataFormat = tuple[list[int], list[int], list[Scalar]]
 
-class PositionMatrix(dict[tuple[int, int], _Scalar]): ...
-class PositionMatrixPair(tuple[PositionMatrix[_Scalar], PositionMatrix[_Scalar] | None]): ...
+class PositionMatrix(dict[tuple[int, int], Scalar]): ...
+class PositionMatrixPair(tuple[PositionMatrix[Scalar], PositionMatrix[Scalar] | None]): ...
 
-class MomentMatrix(Generic[_PolynomialElements, _Scalar]):
+class MomentMatrix(Generic[PolynomialElements, Scalar]):
     @property
-    def data(self) -> dict[_PolynomialElements, PositionMatrixPair[_Scalar]]: ...
+    def data(self) -> dict[PolynomialElements, PositionMatrixPair[Scalar]]: ...
     @property
     def size(self) -> int: ...
     def as_row_col_data_format(
         self,
     ) -> dict[
-        _PolynomialElements,
-        tuple[_PositionMatrixRowColDataFormat[float], None]
-        | tuple[_PositionMatrixRowColDataFormat[_Scalar], _PositionMatrixRowColDataFormat[_Scalar]],
+        PolynomialElements,
+        tuple[PositionMatrixRowColDataFormat[float], None]
+        | tuple[PositionMatrixRowColDataFormat[Scalar], PositionMatrixRowColDataFormat[Scalar]],
     ]: ...
+    def __contains__(self, item: PolynomialElements) -> bool: ...
+    def __getitem__(self, key: PolynomialElements) -> Scalar: ...
+    def get_canonical(self, monomial: PolynomialElements) -> tuple[PolynomialElements, bool, bool]: ...
 
-class _BaseSdpRelaxation(Generic[_PolynomialElements, _Scalar]):
+RealValuedCommutativeMomentMatrix: TypeAlias = MomentMatrix[CommutativePolynomialElement, float]
+ComplexValuedCommutativeMomentMatrix: TypeAlias = MomentMatrix[CommutativePolynomialElement, complex]
+RealValuedNonCommutativeMomentMatrix: TypeAlias = MomentMatrix[NonCommutativePolynomialElement, float]
+ComplexValuedNonCommutativeMomentMatrix: TypeAlias = MomentMatrix[NonCommutativePolynomialElement, complex]
+
+class BaseSdpRelaxation(Generic[PolynomialElements, Scalar]):
     @property
-    def objective(self) -> _Polynomial[_PolynomialElements, _Scalar]: ...
+    def objective(self) -> Polynomial[PolynomialElements, Scalar]: ...
     @property
-    def moment_matrices(self) -> dict[int, MomentMatrix[_PolynomialElements, _Scalar]]: ...
+    def moment_matrices(self) -> dict[int, MomentMatrix[PolynomialElements, Scalar]]: ...
     @property
     def localising_moment_matrices_inequalities(
         self,
-    ) -> dict[int, list[MomentMatrix[_PolynomialElements, _Scalar]]]: ...
+    ) -> dict[int, list[MomentMatrix[PolynomialElements, Scalar]]]: ...
     @property
     def localising_moment_matrices_equalities(
         self,
-    ) -> dict[int, list[MomentMatrix[_PolynomialElements, _Scalar]]]: ...
+    ) -> dict[int, list[MomentMatrix[PolynomialElements, Scalar]]]: ...
     @property
-    def moment_equalities(self) -> list[tuple[_Polynomial[_PolynomialElements, _Scalar], _Scalar]]: ...
+    def moment_equalities(self) -> list[tuple[Polynomial[PolynomialElements, Scalar], Scalar]]: ...
     @property
-    def moment_inequalities(self) -> list[tuple[_Polynomial[_PolynomialElements, _Scalar], float]]: ...
+    def moment_inequalities(self) -> list[tuple[Polynomial[PolynomialElements, Scalar], float]]: ...
     @property
     def is_real(self) -> bool: ...
+    @overload
+    def rewrite(self, mon_or_poly: PolynomialElements) -> PolynomialElements: ...
+    @overload
+    def rewrite(
+        self, mon_or_poly: Polynomial[PolynomialElements, Scalar]
+    ) -> Polynomial[PolynomialElements, Scalar]: ...
+    def rewrite(
+        self, mon_or_poly: PolynomialElements | Polynomial[PolynomialElements, Scalar]
+    ) -> PolynomialElements | Polynomial[PolynomialElements, Scalar]: ...
+    def split_into_real_and_imaginary_parts(
+        self, polynomial: Polynomial[PolynomialElements, Scalar]
+    ) -> tuple[
+        dict[PolynomialElements, tuple[float, float | None]],
+        dict[PolynomialElements, tuple[float, float | None]] | None,
+    ]: ...
+    def change_variables(
+        self,
+        polynomial: Polynomial[PolynomialElements, Scalar],
+        mapping: dict[PolynomialElements, VectorSpaceElement[Scalar]],
+    ) -> VectorSpaceElement[Scalar]: ...
+    @property
+    def generating_sets(self) -> dict[int, list[PolynomialElements]]: ...
+    @property
+    def equalities(self) -> dict[int, list[Polynomial[PolynomialElements, Scalar]]]: ...
+    @property
+    def inequalities(self) -> dict[int, list[Polynomial[PolynomialElements, Scalar]]]: ...
 
-class RealValuedCommutativeSdpRelaxation(_BaseSdpRelaxation[_CommutativePolynomialElement, float]):
+class RealValuedCommutativeSdpRelaxation(BaseSdpRelaxation[CommutativePolynomialElement, float]):
     @property
     def is_real(self) -> Literal[True]: ...
 
-class ComplexValuedCommutativeSdpRelaxation(_BaseSdpRelaxation[_CommutativePolynomialElement, complex]):
+class ComplexValuedCommutativeSdpRelaxation(BaseSdpRelaxation[CommutativePolynomialElement, complex]):
     @property
     def is_real(self) -> Literal[False]: ...
 
-class RealValuedNonCommutativeSdpRelaxation(_BaseSdpRelaxation[_NonCommutativePolynomialElement, float]):
+class RealValuedNonCommutativeSdpRelaxation(BaseSdpRelaxation[NonCommutativePolynomialElement, float]):
     @property
     def is_real(self) -> Literal[True]: ...
 
-class ComplexValuedNonCommutativeSdpRelaxation(_BaseSdpRelaxation[_NonCommutativePolynomialElement, complex]):
+class ComplexValuedNonCommutativeSdpRelaxation(BaseSdpRelaxation[NonCommutativePolynomialElement, complex]):
     @property
     def is_real(self) -> Literal[False]: ...
 
@@ -91,7 +142,7 @@ def get_relaxation(  # type: ignore[overload-overlap]
     level: int,
     objective: RealCoefficientsCommutativePolynomial,
     *,
-    substitutions: dict[_CommutativePolynomialElement, float | _CommutativePolynomialElement] | None = None,
+    substitutions: dict[CommutativePolynomialElement, float | CommutativePolynomialElement] | None = None,
     operator_constraints: list[RealCoefficientsCommutativeConstraint] | None = None,
     moment_constraints: list[RealCoefficientsCommutativeConstraint] | None = None,
     normalization_constraints: list[RealCoefficientsCommutativeConstraint] | None = None,
@@ -104,7 +155,7 @@ def get_relaxation(
     level: int,
     objective: RealCoefficientsCommutativePolynomial | ComplexCoefficientsCommutativePolynomial,
     *,
-    substitutions: dict[_CommutativePolynomialElement, float | _CommutativePolynomialElement] | None = None,
+    substitutions: dict[CommutativePolynomialElement, float | CommutativePolynomialElement] | None = None,
     operator_constraints: list[RealCoefficientsCommutativeConstraint | ComplexCoefficientsCommutativeConstraint]
     | None = None,
     moment_constraints: list[RealCoefficientsCommutativeConstraint | ComplexCoefficientsCommutativeConstraint]
@@ -120,7 +171,7 @@ def get_relaxation(  # type: ignore[overload-overlap]
     level: int,
     objective: RealCoefficientsNonCommutativePolynomial,
     *,
-    substitutions: dict[_NonCommutativePolynomialElement, float | _NonCommutativePolynomialElement] | None = None,
+    substitutions: dict[NonCommutativePolynomialElement, float | NonCommutativePolynomialElement] | None = None,
     operator_constraints: list[RealCoefficientsNonCommutativeConstraint] | None = None,
     moment_constraints: list[RealCoefficientsNonCommutativeConstraint] | None = None,
     normalization_constraints: list[RealCoefficientsNonCommutativeConstraint] | None = None,
@@ -133,7 +184,7 @@ def get_relaxation(
     level: int,
     objective: RealCoefficientsNonCommutativePolynomial | ComplexCoefficientsNonCommutativePolynomial,
     *,
-    substitutions: dict[_NonCommutativePolynomialElement, float | _NonCommutativePolynomialElement] | None = None,
+    substitutions: dict[NonCommutativePolynomialElement, float | NonCommutativePolynomialElement] | None = None,
     operator_constraints: list[RealCoefficientsNonCommutativeConstraint | ComplexCoefficientsNonCommutativeConstraint]
     | None = None,
     moment_constraints: list[RealCoefficientsNonCommutativeConstraint | ComplexCoefficientsNonCommutativeConstraint]

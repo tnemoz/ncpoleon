@@ -253,7 +253,7 @@ macro_rules! impl_sdp_relaxation_pymethods {
         impl $py_relaxation {
             fn change_variables<'py>(
                 &self,
-                // FIXME: shuld probaby use a reference here, otherwise the polynomial is cloned
+                // FIXME: should probaby use a reference here, otherwise the polynomial is cloned
                 polynomial: $py_poly,
                 mapping: &Bound<'py, PyDict>,
             ) -> PyResult<Bound<'py, PyAny>> {
@@ -296,6 +296,7 @@ macro_rules! impl_sdp_relaxation_pymethods {
                 if let Some(res) = res { res } else { Err(PyValueError::new_err("Can't replace the Zero polynomial.")) }
             }
 
+            // FIXME: This docstring is unclear and not helpful
             /// Splits a polynomial of moments into its real and imaginary parts.
             ///
             /// Given `P = Σ_m c_m [m]` where each `[m]` is a (possibly complex) moment, this
@@ -370,7 +371,7 @@ macro_rules! impl_sdp_relaxation_pymethods {
                     .collect();
                 let python_imag_part: BTreeMap<_, _> = imag_part
                     .into_iter()
-                    // We use unwrap here since we always insert the imaginarity part with Some, no None in unreachable
+                    // We use unwrap here since we always insert the imaginarity part with Some, no None is unreachable
                     .filter(|(_mon, (coeff_re, coeff_im))| *coeff_re != 0.0 || coeff_im.unwrap() != 0.0)
                     .map(|(rust_monomial, coeff)| ($py_monomial(rust_monomial), coeff))
                     .collect();
@@ -404,9 +405,9 @@ macro_rules! impl_sdp_relaxation_pymethods {
                     .collect()
             }
 
-            fn reduce_monomial<'py>(&self, monomial: &Bound<'py, PyAny>) -> PyResult<$py_monomial> {
-                let mon: $py_monomial = monomial.try_into()?;
-                Ok(
+            fn rewrite<'py>(&self, mon_or_poly: &Bound<'py, PyAny>) -> PyResult<Py<PyAny>> {
+                let py = mon_or_poly.py();
+                if let Ok(mon) = TryInto::<$py_monomial>::try_into(mon_or_poly) {
                     $py_monomial(
                         mon.0
                         .rewrite(
@@ -414,13 +415,24 @@ macro_rules! impl_sdp_relaxation_pymethods {
                             &self.0.substitutions
                         )
                         .map_err(PyValueError::new_err)?
-                    )
-                )
+                    ).into_py_any(py)
+                } else {
+                    let poly: $py_poly = mon_or_poly.try_into()?;
+                    $py_poly(
+                        poly.0
+                        .rewrite(
+                            self.0.substitution_strategy,
+                            &self.0.substitutions
+                        )
+                        .map_err(PyValueError::new_err)?
+                    ).into_py_any(py)
+                }
             }
 
             /// Dictionary of all generating sets
             ///
             /// Each element corresponds to a unique moment matrix index.
+            #[getter]
             fn generating_sets(&self) -> BTreeMap<u8, Vec<$py_monomial>> {
                 self.0
                     .generating_sets
@@ -468,6 +480,24 @@ macro_rules! impl_sdp_relaxation_pymethods {
             #[getter]
             fn moment_inequalities(&self) -> Vec<($py_poly, f64)> {
                 self.0.moment_inequalities.iter().map(|(poly, value)| ($py_poly(poly.clone()), *value)).collect()
+            }
+
+            #[getter]
+            fn equalities(&self) -> BTreeMap<u8, Vec<$py_poly>> {
+                self.0.
+                    equalities.
+                    iter()
+                    .map(|(&mm_id, equalities_id)| (mm_id,equalities_id.iter().map(|poly| $py_poly(poly.clone())).collect()))
+                    .collect()
+            }
+
+            #[getter]
+            fn inequalities(&self) -> BTreeMap<u8, Vec<$py_poly>> {
+                self.0
+                    .inequalities
+                    .iter()
+                    .map(|(&mm_id, equalities_id)| (mm_id, equalities_id.iter().map(|poly| $py_poly(poly.clone())).collect()))
+                    .collect()
             }
         }
     };
