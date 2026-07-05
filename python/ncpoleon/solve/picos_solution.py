@@ -44,7 +44,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         if self._primal:
             if is_adjoint and not is_real_valued:
                 return self._problem.get_variable(str(canonical_monomial)).value.conjugate()
-            if is_real_valued:
+            else:
                 return self._problem.get_variable(str(canonical_monomial)).value
         else:
             return -self._problem.get_constraint(self._constraints[f"M-{canonical_monomial}"]).dual
@@ -61,6 +61,9 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
             else:
                 res[id] = np.array(self._problem.get_constraint(self._constraints[f"Y_{id}"]).dual)
 
+            if not res[id].shape:  # For 1x1 constraints or variables, Picos returns a 0D array
+                res[id] = res[id].reshape((1, 1))
+
         return res
 
     @property
@@ -74,6 +77,9 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
                 res[id] = np.array(self._problem.get_constraint(self._constraints[f"MM-{id}"]).dual)
             else:
                 res[id] = np.array(self._problem.get_variable(f"Y_{id}").value)
+
+            if not res[id].shape:  # For 1x1 constraints or variables, Picos returns a 0D array
+                res[id] = res[id].reshape((1, 1))
 
         return res
 

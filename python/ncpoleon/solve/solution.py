@@ -13,7 +13,8 @@ from .sos_decomposition import (
     LocalizingMomentMatrixEqualityDecomposition,
     LocalizingMomentMatrixInequalityDecomposition,
     MomentMatrixDecomposition,
-    SingleMomentDecomposition,
+    SingleMomentEqualityDecomposition,
+    SingleMomentInequalityDecomposition,
     SoSDecomposition,
 )
 
@@ -108,7 +109,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
             warnings.warn(
                 "The solution contains multiple moment matrices. The `localizing_matrices_inequality` "
                 "property will only return the inequality localizing moment matrices associated to the moment matrix of"
-                " index 0. Use `localizing_matrices_inequality_constraints_by_mm_id` to access all of them.",
+                " index 0. Use `localizing_matrices_inequality_by_mm_id` to access all of them.",
             )
         return localizing_matrices[0]
 
@@ -129,7 +130,12 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     @property
     def localizing_matrices_inequality_multipliers(
         self,
-    ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]:
+    ) -> list[
+        tuple[
+            Polynomial[PolynomialElements, Scalar],
+            np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+        ]
+    ]:
         localizing_matrices_multipliers = self.localizing_matrices_inequality_multipliers_by_mm_id
         if len(localizing_matrices_multipliers) > 1:
             warnings.warn(
@@ -144,7 +150,15 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     @abstractmethod
     def localizing_matrices_inequality_multipliers_by_mm_id(
         self,
-    ) -> dict[int, list[np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]]: ...
+    ) -> dict[
+        int,
+        list[
+            tuple[
+                Polynomial[PolynomialElements, Scalar],
+                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+            ]
+        ],
+    ]: ...
 
     @property
     @abstractmethod
@@ -237,20 +251,20 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
             for generator, coefficient in moment_equality_multipliers.get(mm_id, []):
                 if isinstance(coefficient, float):
                     moment_equalities_terms.append(
-                        SingleMomentDecomposition(
+                        SingleMomentEqualityDecomposition(
                             generator=(self.relaxation.rewrite(generator + generator.adjoint()) / 2),
                             coefficient=coefficient,
                         )
                     )
                 elif isinstance(coefficient, complex):
                     moment_equalities_terms.append(
-                        SingleMomentDecomposition(
+                        SingleMomentEqualityDecomposition(
                             generator=(self.relaxation.rewrite(generator + generator.adjoint()) / 2),
                             coefficient=coefficient.real,
                         )
                     )
                     moment_equalities_terms.append(
-                        SingleMomentDecomposition(
+                        SingleMomentEqualityDecomposition(
                             generator=(self.relaxation.rewrite(generator.adjoint() - generator) / 2),
                             coefficient=coefficient.imag * 1j,
                         )
@@ -265,7 +279,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
 
             for generator, coefficient in moment_inequality_multipliers.get(mm_id, []):
                 moment_inequalities_terms.append(
-                    SingleMomentDecomposition(generator=generator, coefficient=coefficient)
+                    SingleMomentInequalityDecomposition(generator=generator, coefficient=coefficient)
                 )
 
             res[mm_id] = SoSDecomposition[PolynomialElements, Scalar](

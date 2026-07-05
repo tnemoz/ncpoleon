@@ -1,5 +1,21 @@
 from typing import Generic, Literal, TypeAlias, overload
 
+__all__ = [
+    "get_relaxation",
+    "RealCoefficientsCommutativeConstraint",
+    "ComplexCoefficientsCommutativeConstraint",
+    "RealCoefficientsNonCommutativeConstraint",
+    "ComplexCoefficientsNonCommutativeConstraint",
+    "RealValuedCommutativeMomentMatrix",
+    "ComplexValuedCommutativeMomentMatrix",
+    "RealValuedNonCommutativeMomentMatrix",
+    "ComplexValuedNonCommutativeMomentMatrix",
+    "RealValuedCommutativeSdpRelaxation",
+    "ComplexValuedCommutativeSdpRelaxation",
+    "RealValuedNonCommutativeSdpRelaxation",
+    "ComplexValuedNonCommutativeSdpRelaxation",
+]
+
 from ncpoleon._typing import PolynomialElements, Scalar
 from ncpoleon.polynomials import Polynomial, RewritingStrategy, VectorSpaceElement
 from ncpoleon.polynomials.commutative_polynomials import (
@@ -52,6 +68,11 @@ class MomentMatrix(Generic[PolynomialElements, Scalar]):
     def __contains__(self, item: PolynomialElements) -> bool: ...
     def __getitem__(self, key: PolynomialElements) -> Scalar: ...
     def get_canonical(self, monomial: PolynomialElements) -> tuple[PolynomialElements, bool, bool]: ...
+
+RealValuedCommutativeMomentMatrix: TypeAlias = MomentMatrix[CommutativePolynomialElement, float]
+ComplexValuedCommutativeMomentMatrix: TypeAlias = MomentMatrix[CommutativePolynomialElement, complex]
+RealValuedNonCommutativeMomentMatrix: TypeAlias = MomentMatrix[NonCommutativePolynomialElement, float]
+ComplexValuedNonCommutativeMomentMatrix: TypeAlias = MomentMatrix[NonCommutativePolynomialElement, complex]
 
 class BaseSdpRelaxation(Generic[PolynomialElements, Scalar]):
     @property
