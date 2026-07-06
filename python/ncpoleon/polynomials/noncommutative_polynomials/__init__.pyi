@@ -122,7 +122,7 @@ class NonCommutativeMonomial:
 NonCommutativePolynomialElement: TypeAlias = NonCommutativeMonomial | NonCommutativeOperator
 
 class NonCommutativePolynomial(Polynomial[NonCommutativePolynomialElement, Scalar]):
-    def adjoint(self) -> Self: ...
+    ...
 
 RealCoefficientsNonCommutativePolynomial: TypeAlias = NonCommutativePolynomial[float]
 ComplexCoefficientsNonCommutativePolynomial: TypeAlias = NonCommutativePolynomial[complex]

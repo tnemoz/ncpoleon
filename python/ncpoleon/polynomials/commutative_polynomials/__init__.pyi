@@ -121,8 +121,9 @@ class CommutativeMonomial:
 
 CommutativePolynomialElement: TypeAlias = CommutativeMonomial | CommutativeOperator
 
+
 class CommutativePolynomial(Polynomial[CommutativePolynomialElement, Scalar]):
-    def adjoint(self) -> Self: ...
+    ...
 
 RealCoefficientsCommutativePolynomial: TypeAlias = CommutativePolynomial[float]
 ComplexCoefficientsCommutativePolynomial: TypeAlias = CommutativePolynomial[complex]

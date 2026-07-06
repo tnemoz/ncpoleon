@@ -256,11 +256,7 @@ def to_mosek(
             changed = sdp.change_variables(poly, mapped_variables)
 
             if isinstance(changed, _ComplexExpr):
-<<<<<<< HEAD
-                M.constraint(f"MI-{index}", changed.real, Domain.equalsTo(value))
-=======
                 M.constraint(f"MI-{index}", changed.real, Domain.greaterThan(value))
->>>>>>> main
                 logger.debug(f"Added constraint {changed.real} >= {value}.")
             else:
                 M.constraint(f"MI-{index}", changed, Domain.greaterThan(value))
