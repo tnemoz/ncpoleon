@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+
 jobs:
   # push to main / manual dispatch: already requires write access to trigger,
   # so these run immediately with no extra approval step.
@@ -28,32 +33,39 @@ jobs:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@stable
         with:
-            components: llvm-tools-preview
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: taiki-e/install-action@v2.83.2
+        with:
+          tool: cargo-llvm-cov
       - uses: astral-sh/setup-uv@v8.2.0
-      - name: Setup compilation
-        run: |
-          source <(cargo llvm-cov show-env --sh)
-          cargo llvm-cov clean --workspace
-      - name: Rust tests
-        run: cargo test
-      - name: MOSEK-backed Python tests
+      - name: Tests and coverage with MOSEK license
         env:
           MSK_LICENSE: ${{ secrets.MSK_LICENSE }}
         run: |
+          source <(cargo llvm-cov show-env --sh)
+          cargo llvm-cov clean --workspace
+          cargo test
           echo "$MSK_LICENSE" > "$HOME/mosek.lic"
-          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run python -c \
+          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run --all-extras --dev --config-setting 'build-args=--profile=dev' python -c \
             "from ncpoleon.utils import is_mosek_available; assert is_mosek_available(), 'MOSEK license checkout failed'"
-          
-          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run --all-extras --dev --config-setting 'build-args=--profile=dev' pytest -x --cov=ncpoleon --cov-report xml
-      - name: Generate LCOV report
-        run: cargo llvm-cov report --lcov --output-path coverage.lcov
-      - uses: codecov/codecov-action@v7.0.0
+
+          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run --all-extras --dev --config-setting 'build-args=--profile=dev' pytest --cov=ncpoleon --cov-report xml
+          cargo llvm-cov report --lcov --output-path coverage.lcov
+      - name: Upload Rust coverage
+        uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.lcov,coverage.xml
+          files: coverage.lcov
+          flags: rust
+          disable_search: true
+      - name: Upload Python coverage
+        uses: codecov/codecov-action@v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: python
+          disable_search: true
 
   approve:
     if: github.event_name == 'pull_request_target'
@@ -79,31 +91,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: taiki-e/install-action@v2.83.2
+        with:
+          tool: cargo-llvm-cov
       - uses: astral-sh/setup-uv@v8.2.0
-      - name: Setup compilation
-        run: |
-          source <(cargo llvm-cov show-env --sh)
-          cargo llvm-cov clean --workspace
-      - name: Rust tests
-        run: cargo test
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-      - uses: astral-sh/setup-uv@v8.2.0
-      - name: MOSEK-backed Python tests
+      - name: Tests and coverage with MOSEK license
         env:
           MSK_LICENSE: ${{ secrets.MSK_LICENSE }}
         run: |
+          source <(cargo llvm-cov show-env --sh)
+          cargo llvm-cov clean --workspace
+          cargo test
           echo "$MSK_LICENSE" > "$HOME/mosek.lic"
-          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run python -c \
+          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run --all-extras --dev --config-setting 'build-args=--profile=dev' python -c \
             "from ncpoleon.utils import is_mosek_available; assert is_mosek_available(), 'MOSEK license checkout failed'"
-          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run --all-extras --dev --config-setting 'build-args=--profile=dev' pytest -x --cov=ncpoleon --cov-report xml
-      - name: Generate LCOV report
-        run: cargo llvm-cov report --lcov --output-path coverage.lcov
-      - uses: codecov/codecov-action@v7.0.0
+
+          MOSEKLM_LICENSE_FILE="$HOME/mosek.lic" uv run --all-extras --dev --config-setting 'build-args=--profile=dev' pytest --cov=ncpoleon --cov-report xml
+          cargo llvm-cov report --lcov --output-path coverage.lcov
+      - name: Upload Rust coverage
+        uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           override_pr: ${{ github.event.number }}
           override_commit: ${{ github.event.pull_request.head.sha }}
-          files: coverage.lcov,coverage.xml
+          files: coverage.lcov
+          flags: rust
+          disable_search: true
+      - name: Upload Python coverage
+        uses: codecov/codecov-action@v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          override_pr: ${{ github.event.number }}
+          override_commit: ${{ github.event.pull_request.head.sha }}
+          files: coverage.xml
+          flags: python
+          disable_search: true
