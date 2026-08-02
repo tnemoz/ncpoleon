@@ -1,0 +1,45 @@
+name: MOSEK license probe
+
+# Diagnostic for the ~70s-per-call `is_mosek_available()` stall on macOS arm64. Temporary:
+# delete this workflow and scripts/probe_mosek_license.py once the cause is identified.
+#
+# `workflow_dispatch` alone would not help here -- GitHub only offers that button for
+# workflows already on the default branch, and this one lives on a feature branch. The push
+# trigger is filtered to the two probe files so it fires when they land and stays quiet
+# afterwards; the dispatch entry is there for re-runs once it does reach the default branch.
+on:
+  push:
+    paths:
+      - scripts/probe_mosek_license.py
+      - .github/workflows/mosek-license-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The stall is 70s per checkout and the script does two, so a healthy run is minutes.
+    # This only needs to stop a pathological hang from burning the job's full allowance.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest is the control: same script, same MOSEK wheel, ~70ms per call. The
+        # comparison is the point, so read the two logs side by side.
+        #
+        # macos-15-intel would separate "macOS" from "arm64", but MOSEK publishes no macOS
+        # x86_64 wheel, so there is nothing to probe there.
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.3.2
+      - name: Probe MOSEK license checkout
+        # `--no-project` keeps maturin and the Rust toolchain out of this entirely: the
+        # script imports mosek and nothing from ncpoleon, so building the extension would
+        # add minutes and prove nothing. `-u` matters -- see the script docstring.
+        run: uv run --no-project --with mosek --python 3.11 python -u scripts/probe_mosek_license.py
