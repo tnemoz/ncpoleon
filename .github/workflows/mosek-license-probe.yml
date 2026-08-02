@@ -38,6 +38,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v8.3.2
+      # The fix under test. Run 30750540985 established that the 70s is two 35s mDNS
+      # timeouts resolving the runner's own unresolvable `.local` hostname, so giving the
+      # resolver a local answer should collapse phases 3 and 6 to zero. mDNSResponder does
+      # consult /etc/hosts, including for `.local` names -- that it actually does so on this
+      # runner image is exactly what this run is checking.
+      #
+      # Delete this step to re-measure the baseline; the phase timings are the comparison.
+      - name: Make the runner's own hostname resolvable
+        if: runner.os == 'macOS'
+        run: echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts
       - name: Probe MOSEK license checkout
         # `--no-project` keeps maturin and the Rust toolchain out of this entirely: the
         # script imports mosek and nothing from ncpoleon, so building the extension would
