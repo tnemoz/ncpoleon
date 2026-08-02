@@ -6,7 +6,7 @@ name: MOSEK license probe
 # `workflow_dispatch` alone would not help here -- GitHub only offers that button for
 # workflows already on the default branch, and this one lives on a feature branch. The push
 # trigger is filtered to the two probe files so it fires when they land and stays quiet
-# afterwards; the dispatch entry is there for re-runs once it does reach the default branch.
+# afterwards; the dispatch entry is there for re-runs once it does reach the default branch
 on:
   push:
     paths:
