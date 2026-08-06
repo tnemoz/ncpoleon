@@ -1,4 +1,7 @@
+import logging
 from importlib.util import find_spec
+
+logger = logging.getLogger(__name__)
 
 
 def is_mosek_available():
@@ -6,9 +9,13 @@ def is_mosek_available():
         return False
     try:
         import mosek
+    except ImportError:
+        return False
 
+    try:
         with mosek.Env() as env:
             env.checkoutlicense(mosek.feature.pts)
         return True
     except mosek.Error:
+        logger.warning("MOSEK is installed but no valid license has been found.")
         return False
