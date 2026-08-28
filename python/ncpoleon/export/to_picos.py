@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, overload, Literal
 import numpy as np
 from scipy.sparse import coo_matrix
 
+from ncpoleon.relaxations import Realness
+
 try:
     import picos as pc
 
@@ -44,6 +46,26 @@ def convert_row_col_data_to_coo_matrix(
     return coo_matrix((np.array(data), (np.array(rows), np.array(cols))), shape=(size, size))
 
 
+def moment_matrix_entry_to_picos(
+    variable: pc.RealVariable | pc.ComplexVariable,
+    position_matrix: tuple[list[int], list[int], list[Scalar]],
+    realness: Realness,
+    size: int,
+) -> pc.Expression:
+    """Build the contribution of a single monomial to a (localising) moment matrix.
+
+    A real entry stores both orientations of each position, so its position matrix is used as is. A complex entry only
+    stores the positions of the canonical monomial: the adjoint monomial sits at the conjugate transposed positions and
+    is associated to the conjugate of the same variable.
+    """
+    matrix = convert_row_col_data_to_coo_matrix(position_matrix, size)
+
+    if realness == Realness.Real:
+        return variable * matrix
+
+    return variable * matrix + variable.conj * matrix.conj().transpose()
+
+
 def to_picos(
     sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
     objective_direction: str,
@@ -78,39 +100,32 @@ def to_picos(
         mapped_variables = {}
 
         for moment_matrix_id, moment_matrix in sdp.moment_matrices.items():
-            mapped_moment_matrix = {}
-            for monomial, (position_matrix, position_matrix_conj) in moment_matrix.as_row_col_data_format().items():
+            moment_matrix_terms = []
+
+            for monomial, (position_matrix, realness) in moment_matrix.as_row_col_data_format().items():
                 new_variable = (
-                    pc.RealVariable(str(monomial))
-                    if position_matrix_conj is None
-                    else pc.ComplexVariable(str(monomial))
+                    pc.RealVariable(str(monomial)) if realness == Realness.Real else pc.ComplexVariable(str(monomial))
                 )
 
-                mapped_moment_matrix[new_variable] = (
-                    convert_row_col_data_to_coo_matrix(position_matrix, moment_matrix.size),
-                    convert_row_col_data_to_coo_matrix(position_matrix_conj, moment_matrix.size),
+                moment_matrix_terms.append(
+                    moment_matrix_entry_to_picos(new_variable, position_matrix, realness, moment_matrix.size)
                 )
 
                 mapped_variables[monomial] = new_variable
 
-            G = pc.sum(
-                mon * pos_matrix + (0 if pos_matrix_conj is None else mon.conj() * pos_matrix_conj)
-                for mon, (pos_matrix, pos_matrix_conj) in mapped_moment_matrix.items()
-            )
+            G = pc.sum(moment_matrix_terms)
             constraints[f"MM-{moment_matrix_id}"] = problem.add_constraint(G >> 0)
             logger.debug(f"Added moment matrix PSD constraint for moment matrix id {moment_matrix_id}.")
 
         for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
             for index, equality_moment_matrix in enumerate(equality_moment_matrices):
                 new_localising_matrix = pc.sum(
-                    mapped_variables[mon] * convert_row_col_data_to_coo_matrix(pos_matrix, equality_moment_matrix.size)
-                    + (
-                        0
-                        if pos_matrix_conj is None
-                        else mapped_variables[mon].conj()
-                        * convert_row_col_data_to_coo_matrix(pos_matrix_conj, equality_moment_matrix.size)
-                    )
-                    for mon, (pos_matrix, pos_matrix_conj) in equality_moment_matrix.as_row_col_data_format().items()
+                    [
+                        moment_matrix_entry_to_picos(
+                            mapped_variables[mon], pos_matrix, realness, equality_moment_matrix.size
+                        )
+                        for mon, (pos_matrix, realness) in equality_moment_matrix.as_row_col_data_format().items()
+                    ]
                 )
                 constraints[f"LMME-{moment_matrix_id}-{index}"] = problem.add_constraint(new_localising_matrix == 0)
                 logger.debug(f"Added constraint {new_localising_matrix} == 0 for moment matrix id {moment_matrix_id}.")
@@ -118,15 +133,12 @@ def to_picos(
         for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
             for index, inequality_moment_matrix in enumerate(inequality_moment_matrices):
                 new_localising_matrix = pc.sum(
-                    mapped_variables[mon]
-                    * convert_row_col_data_to_coo_matrix(pos_matrix, inequality_moment_matrix.size)
-                    + (
-                        0
-                        if pos_matrix_conj is None
-                        else mapped_variables[mon].conj()
-                        * convert_row_col_data_to_coo_matrix(pos_matrix_conj, inequality_moment_matrix.size)
-                    )
-                    for mon, (pos_matrix, pos_matrix_conj) in inequality_moment_matrix.as_row_col_data_format().items()
+                    [
+                        moment_matrix_entry_to_picos(
+                            mapped_variables[mon], pos_matrix, realness, inequality_moment_matrix.size
+                        )
+                        for mon, (pos_matrix, realness) in inequality_moment_matrix.as_row_col_data_format().items()
+                    ]
                 )
                 constraints[f"LMMI-{moment_matrix_id}-{index}"] = problem.add_constraint(new_localising_matrix >> 0)
                 logger.debug(f"Added constraint {new_localising_matrix} ≽ 0 for moment matrix id {moment_matrix_id}.")
@@ -229,7 +241,7 @@ def to_picos(
                 ],
             ]
 
-            for monomial, (pos_matrix, pos_matrix_conj) in moment_matrix.as_row_col_data_format().items():
+            for monomial, (pos_matrix, realness) in moment_matrix.as_row_col_data_format().items():
                 F = convert_row_col_data_to_coo_matrix(pos_matrix, moment_matrix.size)
                 new_constraint = pc.trace(Y * F)
 
@@ -241,8 +253,10 @@ def to_picos(
                     for multiplier, localizing_matrix, localizing_matrix_as_row_col in zip(
                         lagrange_mutlipliers, localizing_matrices, precomputed_row_cols
                     ):
-                        pos_matrix_localizing, _pos_matrix_localizing_conj = localizing_matrix_as_row_col.get(
-                            monomial, (None, None)
+                        # The realness of the localising entry is not needed here: PICOS handles the Hermitian
+                        # multipliers natively, so the same expression covers both cases
+                        pos_matrix_localizing, _localizing_realness = localizing_matrix_as_row_col.get(
+                            monomial, (None, Realness.Real)
                         )
 
                         if pos_matrix_localizing is not None:
@@ -255,7 +269,7 @@ def to_picos(
 
                     # beta_re can only be None if the monomial isn't present in the moment inequality constraint
                     if beta_re is not None:
-                        if is_problem_real_valued or pos_matrix_conj is None:
+                        if is_problem_real_valued or realness == Realness.Real:
                             assert minus_beta_im is None
                             new_constraint += lambda_m * beta_re
                         else:
@@ -263,7 +277,7 @@ def to_picos(
                             new_constraint += lambda_m * (beta_re - minus_beta_im * 1j)
 
                 for nu_n, ((poly_re, poly_im), _) in zip(nus, split_moment_equalities):
-                    if pos_matrix_conj is None:
+                    if realness == Realness.Real:
                         if is_problem_real_valued:
                             assert poly_im is None
 

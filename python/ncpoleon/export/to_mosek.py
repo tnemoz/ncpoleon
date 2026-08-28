@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
+
+from ncpoleon.relaxations import Realness
 
 try:
     # The following import allows to use dunder methods on MOSEK expressions
     import mosek.fusion.pythonic  # noqa: F401
-    from mosek.fusion import Domain, Expr, ExprMulScalarConst, Matrix, Model, ObjectiveSense, PSDVariable, SparseMatrix
+    from mosek.fusion import Domain, Expr, Matrix, Model, ObjectiveSense, PSDVariable
+
+    if TYPE_CHECKING:
+        from mosek.fusion import Expression, ExprMulScalarConst, SparseMatrix
 
     _mosek_available = True
 except ImportError:
     _mosek_available = False
 
     if TYPE_CHECKING:
-        from mosek.fusion import Expr, ExprMulScalarConst, Matrix, Model, PSDVariable, SparseMatrix
+        from mosek.fusion import Expr, Expression, ExprMulScalarConst, Matrix, Model, PSDVariable, SparseMatrix
 
 from ncpoleon._typing import PolynomialElements, Scalar
 
@@ -29,7 +33,7 @@ logger = logging.getLogger(__name__)
 class _ComplexExpr:
     """Pair of MOSEK Expr objects representing a complex-valued Expr"""
 
-    def __init__(self, real: Expr, imag: Expr):
+    def __init__(self, real: Expression, imag: Expression):
         self.real = real
         self.imag = imag
 
@@ -55,11 +59,8 @@ class _ComplexExpr:
 
 
 def convert_row_col_data_to_mosek_symmetric_matrix(
-    position_matrix: tuple[list[int], list[int], list[float]] | None, size: int
-) -> Matrix | None:
-    if position_matrix is None:
-        return None
-
+    position_matrix: tuple[list[int], list[int], list[float]], size: int
+) -> Matrix:
     rows, cols, data = position_matrix
 
     return Matrix.sparse(size, size, rows, cols, data)
@@ -67,48 +68,87 @@ def convert_row_col_data_to_mosek_symmetric_matrix(
 
 # TODO: add the docstring
 def convert_row_col_data_to_mosek_hermitian_matrix(
-    position_matrix: tuple[list[int], list[int], list[complex]] | None, size: int
-) -> Matrix | None:
-    if position_matrix is None:
-        return None
-
+    position_matrix: tuple[list[int], list[int], list[complex]], size: int
+) -> tuple[Matrix, Matrix, Matrix]:
     rows, cols, data = position_matrix
     data_re = []
     data_im = []
+    neg_data_im = []
 
     for x in data:
         data_re.append(x.real)
         data_im.append(x.imag)
+        neg_data_im.append(-x.imag)
 
-    return (Matrix.sparse(size, size, rows, cols, data_re), Matrix.sparse(size, size, rows, cols, data_im))
+    return (
+        Matrix.sparse(size, size, rows, cols, data_re),
+        Matrix.sparse(size, size, rows, cols, data_im),
+        Matrix.sparse(size, size, rows, cols, neg_data_im),
+    )
 
 
 def rust_moment_matrix_to_mosek(
     moment_matrix: MomentMatrix[PolynomialElements, Scalar],
     mapped_variables: dict[PolynomialElements, Expr | _ComplexExpr],
-    matrix_builder: Callable[[tuple[list[int], list[int], list[complex]] | None, int], Matrix | None],
-) -> Matrix:
+    is_problem_real_valued: bool,
+) -> Expression:
+    if is_problem_real_valued:
+        mosek_moment_matrix = 0
+
+        for mon, (pos_matrix, realness) in moment_matrix.as_row_col_data_format().items():
+            pos_matrix = convert_row_col_data_to_mosek_symmetric_matrix(pos_matrix, moment_matrix.size)
+            mosek_moment_matrix = Expr.add(mosek_moment_matrix, Expr.mul(mapped_variables[mon], pos_matrix))
+
+        return mosek_moment_matrix
+
     mosek_moment_matrix_re = 0
     mosek_moment_matrix_im = 0
 
-    for mon, (pos_matrix, pos_matrix_conj) in moment_matrix.as_row_col_data_format().items():
-        pos_matrix = matrix_builder(pos_matrix, moment_matrix.size)
-        pos_matrix_conj = matrix_builder(pos_matrix_conj, moment_matrix.size)
+    for mon, (pos_matrix, realness) in moment_matrix.as_row_col_data_format().items():
+        pos_matrix = convert_row_col_data_to_mosek_hermitian_matrix(pos_matrix, moment_matrix.size)
 
-        if pos_matrix_conj is None:
-            mosek_moment_matrix_re = Expr.add(mosek_moment_matrix_re, Expr.mul(mapped_variables[mon], pos_matrix))
-        else:
-            mosek_moment_matrix_re = Expr.add(mosek_moment_matrix_re, Expr.mul(mapped_variables[mon].real, pos_matrix))
+        if realness == Realness.Real:
             mosek_moment_matrix_re = Expr.add(
-                mosek_moment_matrix_re, Expr.mul(mapped_variables[mon].real, pos_matrix_conj)
+                mosek_moment_matrix_re,
+                Expr.mul(mapped_variables[mon], pos_matrix[0]),
             )
-            mosek_moment_matrix_im = Expr.add(mosek_moment_matrix_im, Expr.mul(mapped_variables[mon].imag, pos_matrix))
             mosek_moment_matrix_im = Expr.add(
-                mosek_moment_matrix_im, Expr.mul(Expr.mul(-1, mapped_variables[mon].imag), pos_matrix_conj)
+                mosek_moment_matrix_im,
+                Expr.mul(mapped_variables[mon], pos_matrix[1]),
+            )
+        else:
+            mosek_moment_matrix_re = Expr.add(
+                mosek_moment_matrix_re,
+                Expr.sub(
+                    Expr.add(
+                        Expr.mul(mapped_variables[mon].real, pos_matrix[0]),
+                        Expr.mul(mapped_variables[mon].real, pos_matrix[0].transpose()),
+                    ),
+                    Expr.add(
+                        Expr.mul(mapped_variables[mon].imag, pos_matrix[1]),
+                        Expr.mul(mapped_variables[mon].imag, pos_matrix[1].transpose()),
+                    ),
+                ),
+            )
+            mosek_moment_matrix_im = Expr.add(
+                mosek_moment_matrix_im,
+                Expr.add(
+                    Expr.sub(
+                        Expr.mul(mapped_variables[mon].real, pos_matrix[1]),
+                        Expr.mul(mapped_variables[mon].real, pos_matrix[1].transpose()),
+                    ),
+                    Expr.sub(
+                        Expr.mul(mapped_variables[mon].imag, pos_matrix[0]),
+                        Expr.mul(mapped_variables[mon].imag, pos_matrix[0].transpose()),
+                    ),
+                ),
             )
 
+    # Every entry turned out to be real: the embedding would be block-diagonal with both blocks equal to the real
+    # part, which is PSD if and only if that part is, so we can return it directly
     if isinstance(mosek_moment_matrix_im, int):
         return mosek_moment_matrix_re
+
     return Expr.vstack(
         [
             Expr.hstack([mosek_moment_matrix_re, Expr.mul(-1.0, mosek_moment_matrix_im)]),
@@ -197,17 +237,12 @@ def to_mosek(
 
         mapped_variables = {}
         is_problem_real_valued = sdp.is_real
-        matrix_builder = (
-            convert_row_col_data_to_mosek_symmetric_matrix
-            if is_problem_real_valued
-            else convert_row_col_data_to_mosek_hermitian_matrix
-        )
 
         for moment_matrix_id, moment_matrix in sdp.moment_matrices.items():
-            for monomial, (_position_matrix, position_matrix_conj) in moment_matrix.as_row_col_data_format().items():
+            for monomial, (_position_matrix, realness) in moment_matrix.as_row_col_data_format().items():
                 new_variable = (
                     M.variable(str(monomial), Domain.unbounded())
-                    if position_matrix_conj is None
+                    if realness == Realness.Real
                     else _ComplexExpr(
                         M.variable(f"{str(monomial)}_re", Domain.unbounded()),
                         M.variable(f"{str(monomial)}_im", Domain.unbounded()),
@@ -216,7 +251,7 @@ def to_mosek(
 
                 mapped_variables[monomial] = new_variable
 
-            mosek_moment_matrix = rust_moment_matrix_to_mosek(moment_matrix, mapped_variables, matrix_builder)
+            mosek_moment_matrix = rust_moment_matrix_to_mosek(moment_matrix, mapped_variables, is_problem_real_valued)
             M.constraint(
                 f"MM-{moment_matrix_id}", mosek_moment_matrix, Domain.inPSDCone(mosek_moment_matrix.getShape()[0])
             )
@@ -225,7 +260,7 @@ def to_mosek(
         for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
             for index, equality_moment_matrix in enumerate(equality_moment_matrices):
                 mosek_new_localising_matrix = rust_moment_matrix_to_mosek(
-                    equality_moment_matrix, mapped_variables, matrix_builder
+                    equality_moment_matrix, mapped_variables, is_problem_real_valued
                 )
                 M.constraint(f"LMME-{moment_matrix_id}-{index}", mosek_new_localising_matrix, Domain.equalsTo(0))
                 logger.debug(
@@ -235,7 +270,7 @@ def to_mosek(
         for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
             for index, inequality_moment_matrix in enumerate(inequality_moment_matrices):
                 mosek_new_localising_matrix = rust_moment_matrix_to_mosek(
-                    inequality_moment_matrix, mapped_variables, matrix_builder
+                    inequality_moment_matrix, mapped_variables, is_problem_real_valued
                 )
                 M.constraint(
                     f"LMMI-{moment_matrix_id}-{index}",
@@ -364,15 +399,19 @@ def to_mosek(
                 ],
             ]
 
-            for monomial, (pos_matrix, pos_matrix_conj) in moment_matrix.as_row_col_data_format().items():
+            for monomial, (pos_matrix, realness) in moment_matrix.as_row_col_data_format().items():
                 if is_problem_real_valued:  #  position matrix is symmetric
                     F = convert_row_col_data_to_mosek_symmetric_matrix(pos_matrix, moment_matrix.size)
                     new_constraint = Expr.dot(Y, F)
-                elif pos_matrix_conj is None:  # position matrix is symmetric but represented as Hermitian
-                    F = convert_row_col_data_to_mosek_symmetric_matrix(pos_matrix, moment_matrix.size)
-                    new_constraint = Expr.mul(Expr.dot(Y, Matrix.diag([F, F])), 1 / 2)
+                elif realness == Realness.Real:  # position matrix is symmetric but represented as Hermitian
+                    F_re, F_im, F_im_neg = convert_row_col_data_to_mosek_hermitian_matrix(
+                        pos_matrix, moment_matrix.size
+                    )
+                    new_constraint = Expr.mul(Expr.dot(Y, Matrix.sparse([[F_re, F_im_neg], [F_im, F_re]])), 1 / 2)
                 else:  # position matrix only contains the position of the canonical monomial
-                    F_re, F_im = convert_row_col_data_to_mosek_hermitian_matrix(pos_matrix, moment_matrix.size)
+                    F_re, F_im, _F_im_neg = convert_row_col_data_to_mosek_hermitian_matrix(
+                        pos_matrix, moment_matrix.size
+                    )
                     # Even though the trace of the representation is twice the trace of the original matrix, since we
                     # need to consider F + F^dagger in the trace and since the hermitianize function actually returns
                     # the representation of (F + F^dagger) / 2, we can simply consider .dot here without adding the 1/2
@@ -389,26 +428,27 @@ def to_mosek(
                     for multiplier, localizing_matrix, localizing_matrix_as_row_col in zip(
                         lagrange_mutlipliers, localizing_matrices, precomputed_row_cols
                     ):
-                        pos_matrix_localizing, pos_matrix_localizing_conj = localizing_matrix_as_row_col.get(
-                            monomial, (None, None)
+                        pos_matrix_localizing, localizing_realness = localizing_matrix_as_row_col.get(
+                            monomial, (None, Realness.Real)
                         )
 
                         if pos_matrix_localizing is not None:
                             if is_problem_real_valued:
-                                assert pos_matrix_localizing_conj is None
+                                assert localizing_realness == Realness.Real
                                 G = convert_row_col_data_to_mosek_symmetric_matrix(
                                     pos_matrix_localizing, localizing_matrix.size
                                 )
                                 new_constraint = Expr.add(new_constraint, Expr.dot(multiplier, G))
-                            elif pos_matrix_localizing_conj is None:
-                                G = convert_row_col_data_to_mosek_symmetric_matrix(
+                            elif localizing_realness == Realness.Real:
+                                G_re, G_im, G_im_neg = convert_row_col_data_to_mosek_hermitian_matrix(
                                     pos_matrix_localizing, localizing_matrix.size
                                 )
                                 new_constraint = Expr.add(
-                                    new_constraint, Expr.mul(Expr.dot(multiplier, Matrix.diag([G, G])), 1 / 2)
+                                    new_constraint,
+                                    Expr.mul(Expr.dot(multiplier, Matrix.sparse([[G_re, G_im_neg], [G_im, G_re]])), 1 / 2),
                                 )
                             else:
-                                G_re, G_im = convert_row_col_data_to_mosek_hermitian_matrix(
+                                G_re, G_im, _G_im_neg = convert_row_col_data_to_mosek_hermitian_matrix(
                                     pos_matrix_localizing, localizing_matrix.size
                                 )
                                 new_constraint_re = Expr.add(
@@ -424,7 +464,7 @@ def to_mosek(
 
                     # beta_re can only be None if the monomial isn't present in the moment inequality constraint
                     if beta_re is not None:
-                        if is_problem_real_valued or pos_matrix_conj is None:
+                        if is_problem_real_valued or realness == Realness.Real:
                             assert minus_beta_im is None
                             new_constraint = Expr.add(new_constraint, Expr.mul(lambda_m, beta_re))
                         else:
@@ -435,15 +475,14 @@ def to_mosek(
                             )
 
                 for nu_n, ((poly_re, poly_im), _) in zip(nus, split_moment_equalities):
-                    if pos_matrix_conj is None:
-                        if is_problem_real_valued:
-                            assert poly_im is None
-
+                    if is_problem_real_valued or realness == Realness.Real:
                         delta_re, delta_im = poly_re.get(monomial, (None, None))
 
                         if delta_re is not None:
                             assert delta_im is None
-                            new_constraint = Expr.add(new_constraint, Expr.mul(nu_n, delta_re))
+                            new_constraint = Expr.add(
+                                new_constraint, Expr.mul(nu_n if is_problem_real_valued else nu_n.real, delta_re)
+                            )
                     else:
                         delta_plus_eps_re, minus_delta_minus_eps_im = poly_re.get(monomial, (None, None))
 
@@ -468,7 +507,7 @@ def to_mosek(
 
                 alpha_re, alpha_im = split_objective_re.get(monomial, (0.0, None))
 
-                if pos_matrix_conj is None:
+                if realness == Realness.Real:
                     if is_problem_real_valued:
                         assert alpha_im is None
                     if objective_direction == "min":
