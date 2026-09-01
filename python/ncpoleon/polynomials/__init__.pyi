@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Generic, Protocol, Self, overload
+from typing import Generic, Self, overload
 
 from ncpoleon._typing import PolynomialElements, Scalar, Substituted
 from ncpoleon.relaxations import Constraint
@@ -9,15 +9,7 @@ from ncpoleon.relaxations import Constraint
 from .commutative_polynomials import generate_commutative_variables
 from .noncommutative_polynomials import generate_noncommutative_variables
 
-class RewritingStrategy(Enum):
-    Greedy = 0
-
-# Should be invariant by multiplying and adding within the same vector space
-class VectorSpaceElement(Protocol[Scalar]):
-    def __add__(self, other: VectorSpaceElement[Scalar]) -> VectorSpaceElement[Scalar]: ...
-    def __radd__(self, other: VectorSpaceElement[Scalar]) -> VectorSpaceElement[Scalar]: ...
-    def __mul__(self, other: Scalar) -> VectorSpaceElement[Scalar]: ...
-    def __rmul__(self, other: Scalar) -> VectorSpaceElement[Scalar]: ...
+RewritingStrategy = Enum("RewritingStrategy", {"None": 0, "Greedy": 1})
 
 # FIXME: change _PolynomialsElements to _MonomialType, that don't accept operators. Maybe do this once hybrid
 #  polynomials are done

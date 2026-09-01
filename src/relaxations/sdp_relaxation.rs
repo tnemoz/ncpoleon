@@ -1180,6 +1180,20 @@ where
             .collect::<Result<_, _>>()
             .map_err(PyValueError::new_err)?;
 
+        debug!("Checking the Hermiticity of moment inequalities.");
+        for (moment_inequality, scalar) in self.moment_inequalities.iter() {
+            if !(moment_inequality - moment_inequality.adjoint())
+                .rewrite(self.substitution_strategy, &self.substitutions)
+                .map_err(PyValueError::new_err)?
+                .is_zero()
+            {
+                return Err(PyValueError::new_err(format!(
+                    "The moment inequality constraint {} >= {} isn't Hermitian.",
+                    moment_inequality, scalar
+                )));
+            }
+        }
+
         debug!("Rewriting objective.");
         self.objective =
             objective.rewrite(self.substitution_strategy, &self.substitutions).map_err(PyValueError::new_err)?;
