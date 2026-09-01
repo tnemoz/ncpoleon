@@ -696,32 +696,12 @@ macro_rules! impl_sdp_relaxation_pymethods {
                 if let Some(res) = res { res } else { Err(PyValueError::new_err("Can't replace the Zero polynomial.")) }
             }
 
-            // FIXME: This docstring is unclear and not helpful
-            /// Splits a polynomial of moments into its real and imaginary parts.
-            ///
-            /// Given `P = Σ_m c_m [m]` where each `[m]` is a (possibly complex) moment, this
-            /// groups contributions by canonical monomial and returns two maps:
-            ///
-            /// - `real_part`: for each canonical monomial `μ` with value `p + qi`, gives `(a, b)`
-            ///   such that `Σ_μ (a·p + b·q) = Re(P)`.
-            /// - `imag_part`: same structure, giving `(c, d)` such that `Σ_μ (c·p + d·q) = Im(P)`.
-            ///
-            /// For Hermitian monomials (real-valued moments), the `Option<f64>` is `None` and no
-            /// entry appears in `imag_part`. Returns `(real_part, None)` when `imag_part` is empty,
-            /// i.e. when the polynomial evaluates to a real number for all moment values.
-            ///
-            /// Used to extract dual SDP coefficients from moment (in)equality constraints.
-            // FIXME: Always returning a complex coefficient, with a value of 0 instead of an Option that is None,
-            //  would simplify the code for exporting using the dual problem
-            fn split_into_real_and_imaginary_parts(
+            fn get_coefficients_by_canonical(
                 &self,
                 polynomial: &$py_poly,
-            ) -> PyResult<(BTreeMap<$py_monomial, (f64, Option<f64>)>, Option<BTreeMap<$py_monomial, (f64, Option<f64>)>>)> {
-                let mut real_part: BTreeMap<_, (f64, Option<f64>)> = BTreeMap::new();
-                let mut imag_part: BTreeMap<_, (f64, Option<f64>)> = BTreeMap::new();
-                const REALNESS_INCONSISTENCY_ERR: &str =
-                    "Canonical monomial inconsistently marked as real and non-real. This is likely an error on our \
-                    part, so feel free to open an issue!";
+            ) -> PyResult<(BTreeMap<$py_monomial, $scalar>, BTreeMap<$py_monomial, (Complex<f64>, Complex<f64>)>)> {
+                let mut real_monomials = BTreeMap::new();
+                let mut complex_monomials: BTreeMap<$py_monomial, (Complex<f64>, Complex<f64>)> = BTreeMap::new();
 
                 for (mon, &coeff) in polynomial.0.data.iter() {
                     let moment_matrix = self.0.moment_matrices.get(
@@ -731,66 +711,32 @@ macro_rules! impl_sdp_relaxation_pymethods {
                             mon
                         ))
                     )?;
-                    // Unify f64/Complex<f64>, so that the macro knows that we deal with complex numbers
-                    let as_complex = Complex::from(coeff);
                     let (canonical, canonicality, realness) = moment_matrix
                         .get_canonical(mon)
                         .map_err(PyValueError::new_err)?;
 
-                    if realness == Realness::Real {
-                        real_part.entry(canonical).and_modify(|e| (*e).0 += as_complex.re).or_insert((as_complex.re, None));
-                    } else {
-                        real_part
-                            .entry(canonical.clone())
-                            .and_modify(|e| {
-                                (*e).0 += as_complex.re;
-                                let imag = e.1.as_mut().expect(REALNESS_INCONSISTENCY_ERR);
-                                *imag += if canonicality == Canonicality::Adjoint { as_complex.im } else { -as_complex.im };
-                            })
-                            .or_insert(
-                                (
-                                    as_complex.re,
-                                    Some(if canonicality == Canonicality::Adjoint { as_complex.im } else { -as_complex.im })
-                                )
-                            );
-                        imag_part
-                            .entry(canonical)
-                            .and_modify(|e| {
-                                (*e).0 += as_complex.im;
-                                let imag = e.1.as_mut().expect(REALNESS_INCONSISTENCY_ERR);
-                                *imag += if canonicality == Canonicality::Adjoint { -as_complex.re } else { as_complex.re };
-                            })
-                            .or_insert(
-                                (
-                                    as_complex.im,
-                                    Some(if canonicality == Canonicality::Adjoint {-as_complex.re} else {as_complex.re})
-                                )
-                            );
+                    match (realness, canonicality) {
+                        (Realness::Real, _) => {
+                            *real_monomials.entry($py_monomial(canonical)).or_insert(<$scalar>::zero()) += coeff;
+                        },
+                        (Realness::Complex, Canonicality::Canonical) => {
+                            complex_monomials
+                                .entry($py_monomial(canonical))
+                                .and_modify(|e|
+                                    (*e).0 = Complex::from(coeff)).or_insert((Complex::from(coeff), Complex::zero())
+                                );
+                        },
+                        (Realness::Complex, Canonicality::Adjoint) => {
+                            complex_monomials
+                                .entry($py_monomial(canonical))
+                                .and_modify(|e|
+                                    (*e).1 = Complex::from(coeff)).or_insert((Complex::zero(), Complex::from(coeff))
+                                );
+                        },
                     }
                 }
 
-                // FiXME: slightly slower to do it like this, but much cleaner to code. Benchmark whether
-                //  adding and then filtering is much slower than not adding/removing if coeff is nil
-                let python_real_part = real_part
-                    .into_iter()
-                    .filter(|(_mon, (coeff_re, coeff_im))| match coeff_im {
-                        None => *coeff_re != 0.0,
-                        Some(coeff_im) => (*coeff_re != 0.0) || (*coeff_im != 0.0)
-                    })
-                    .map(|(rust_monomial, coeff)| ($py_monomial(rust_monomial), coeff))
-                    .collect();
-                let python_imag_part: BTreeMap<_, _> = imag_part
-                    .into_iter()
-                    // We use unwrap here since we always insert the imaginarity part with Some, no None is unreachable
-                    .filter(|(_mon, (coeff_re, coeff_im))| *coeff_re != 0.0 || coeff_im.unwrap() != 0.0)
-                    .map(|(rust_monomial, coeff)| ($py_monomial(rust_monomial), coeff))
-                    .collect();
-
-                if python_imag_part.is_empty() {
-                    Ok((python_real_part, None))
-                } else {
-                    Ok((python_real_part, Some(python_imag_part)))
-                }
+                Ok((real_monomials, complex_monomials))
             }
 
             #[getter]

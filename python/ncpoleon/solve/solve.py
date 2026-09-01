@@ -32,14 +32,14 @@ def solve(
 
         return MosekSolution(relaxation, model, primal=force_primal, objective_sense=objective_direction)
     elif solver == "picos":
-        problem, constraints = to_picos(
+        problem, constraints, psd_matrices = to_picos(
             relaxation, objective_direction, primal=force_primal, verbosity=verbosity, **solver_parameters
         )
         problem.solve()
 
-        return PicosSolution(relaxation, problem, constraints, primal=force_primal)
+        return PicosSolution(relaxation, problem, constraints, psd_matrices, primal=force_primal)
     elif solver.startswith("picos-"):  # TODO: to put in the docstring of this function
-        problem, constraints = to_picos(
+        problem, constraints, psd_matrices = to_picos(
             relaxation,
             objective_direction,
             primal=force_primal,
@@ -49,6 +49,6 @@ def solve(
         )
         problem.solve()
 
-        return PicosSolution(relaxation, problem, constraints, primal=force_primal)
+        return PicosSolution(relaxation, problem, constraints, psd_matrices, primal=force_primal)
     else:
         raise ValueError(f"{solver} isn't a valid solver. Possible solvers are mosek, picos and picos-{{solver}}.")

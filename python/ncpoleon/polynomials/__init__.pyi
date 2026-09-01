@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Generic, Protocol, Self, overload
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import PolynomialElements, Scalar, Substituted
 from ncpoleon.relaxations import Constraint
 
 from .commutative_polynomials import generate_commutative_variables
@@ -22,9 +22,7 @@ class VectorSpaceElement(Protocol[Scalar]):
 # FIXME: change _PolynomialsElements to _MonomialType, that don't accept operators. Maybe do this once hybrid
 #  polynomials are done
 class Polynomial(Generic[PolynomialElements, Scalar]):
-    def change_variables(
-        self, mapping: dict[PolynomialElements, VectorSpaceElement[Scalar]]
-    ) -> VectorSpaceElement[Scalar]: ...
+    def change_variables(self, mapping: dict[PolynomialElements, Substituted]) -> Substituted: ...
     def by_moment_matrix_id(self) -> dict[int, Polynomial[PolynomialElements, Scalar]]: ...
     def adjoint(self) -> Polynomial[PolynomialElements, Scalar]: ...
     @overload

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
 from ncpoleon.solve.solution import BaseSolution
 
 if TYPE_CHECKING:
@@ -19,13 +19,15 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         self,
         relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
         problem: pc.Problem,
-        constraints: dict[str, pc.Constraint],
+        constraints: dict[str, pc.constraints.Constraint],
+        psd_matrices: dict[str, pc.expressions.Expression],
         primal: bool,
     ):
         self._relaxation = relaxation
         self._problem = problem
         self._primal = primal
         self._constraints = constraints
+        self._psd_matrices = psd_matrices
 
     @property
     def value(self) -> float:
@@ -47,19 +49,19 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
             else:
                 return self._problem.get_variable(str(canonical_monomial)).value
         else:
-            return -self._problem.get_constraint(self._constraints[f"M-{canonical_monomial}"]).dual
+            return -self._constraints[f"M-{canonical_monomial}"].dual
 
     @property
     def moment_matrix_by_mm_id(
         self,
-    ) -> dict[int, np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]:
+    ) -> dict[int, RealOrComplexMatrix]:
         res = {}
 
         for id in self._relaxation.moment_matrices:
             if self._primal:
-                res[id] = np.array(self._problem.get_constraint(self._constraints[f"MM-{id}"]).lhs.value)
+                res[id] = np.array(self._psd_matrices[f"MM-{id}"].value)
             else:
-                res[id] = np.array(self._problem.get_constraint(self._constraints[f"Y_{id}"]).dual)
+                res[id] = np.array(self._constraints[f"Y_{id}"].dual)
 
             if not res[id].shape:  # For 1x1 constraints or variables, Picos returns a 0D array
                 res[id] = res[id].reshape((1, 1))
@@ -69,12 +71,12 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     @property
     def moment_matrix_multiplier_by_mm_id(
         self,
-    ) -> dict[int, np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]:
+    ) -> dict[int, RealOrComplexMatrix]:
         res = {}
 
         for id in self._relaxation.moment_matrices:
             if self._primal:
-                res[id] = np.array(self._problem.get_constraint(self._constraints[f"MM-{id}"]).dual)
+                res[id] = np.array(self._constraints[f"MM-{id}"].dual)
             else:
                 res[id] = np.array(self._problem.get_variable(f"Y_{id}").value)
 
@@ -91,7 +93,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
                 list[PolynomialElements],
             ]
         ],
@@ -105,9 +107,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
                 # The equality constraints on symmetric matrices are redundant, and thus Picos doesn't return a
                 # Hermitian matrix for the dual, so we have to hermitianize it
                 if self._primal:
-                    to_hermitianize = np.array(
-                        self._problem.get_constraint(self._constraints[f"LMME-{id}-{index}"]).dual
-                    )
+                    to_hermitianize = np.array(self._constraints[f"LMME-{id}-{index}"].dual)
                     to_append = (to_hermitianize + to_hermitianize.T.conj()) / 2
                 else:
                     to_append = np.array(self._problem.get_variable(f"Q_{(id, index)}").value)
@@ -129,7 +129,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
             ]
         ],
     ]:
@@ -140,11 +140,9 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
 
             for index, inequality_constraint in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
-                    to_append = np.array(
-                        self._problem.get_constraint(self._constraints[f"LMMI-{id}-{index}"]).lhs.value
-                    )
+                    to_append = np.array(self._psd_matrices[f"LMMI-{id}-{index}"].value)
                 else:
-                    to_append = np.array(self._problem.get_constraint(self._constraints[f"P_({id}, {index})"]).dual)
+                    to_append = np.array(self._constraints[f"P_({id}, {index})"].dual)
 
                 if not to_append.shape:  # For 1x1 constraints or variables, Picos returns a 0D array
                     to_append = to_append.reshape((1, 1))
@@ -163,7 +161,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
                 list[PolynomialElements],
             ]
         ],
@@ -175,7 +173,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
 
             for index, (inequality_constraint, generating_set) in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
-                    to_append = np.array(self._problem.get_constraint(self._constraints[f"LMMI-{id}-{index}"]).dual)
+                    to_append = np.array(self._constraints[f"LMMI-{id}-{index}"].dual)
                 else:
                     to_append = np.array(self._problem.get_variable(f"P_({id}, {index})").value)
 
@@ -196,7 +194,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
 
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_equalities):
             if self._primal:
-                res.append((polynomial_constraint, self._problem.get_constraint(self._constraints[f"ME-{index}"]).dual))
+                res.append((polynomial_constraint, self._constraints[f"ME-{index}"].dual))
             else:
                 res.append((polynomial_constraint, self._problem.get_variable(f"nu_{index}").value))
 
@@ -208,7 +206,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
 
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_inequalities):
             if self._primal:
-                res.append((polynomial_constraint, self._problem.get_constraint(self._constraints[f"MI-{index}"]).dual))
+                res.append((polynomial_constraint, self._constraints[f"MI-{index}"].dual))
             else:
                 res.append((polynomial_constraint, self._problem.get_variable(f"lambda_{index}").value))
 

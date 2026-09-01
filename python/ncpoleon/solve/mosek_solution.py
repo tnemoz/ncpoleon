@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
 from ncpoleon.solve.solution import BaseSolution
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
     @property
     def moment_matrix_by_mm_id(
         self,
-    ) -> dict[int, np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]:
+    ) -> dict[int, RealOrComplexMatrix]:
         res = {}
 
         for id, moment_matrix in self._relaxation.moment_matrices.items():
@@ -98,7 +98,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
     @property
     def moment_matrix_multiplier_by_mm_id(
         self,
-    ) -> dict[int, np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]:
+    ) -> dict[int, RealOrComplexMatrix]:
         res = {}
 
         for id, moment_matrix in self._relaxation.moment_matrices.items():
@@ -126,7 +126,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
                 list[PolynomialElements],
             ]
         ],
@@ -189,7 +189,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
             ]
         ],
     ]:
@@ -248,7 +248,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
                 list[PolynomialElements],
             ]
         ],

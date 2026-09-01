@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic
+from typing import TYPE_CHECKING, Any, Generic, cast
 
-import numpy as np
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
 from ncpoleon.solve.utils import sos_vectors_of_hermitian_matrix
 
 from .sos_decomposition import (
@@ -24,6 +23,16 @@ if TYPE_CHECKING:
 
 
 class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
+    def _contract_with_generating_set(
+        self, sos_vectors: RealOrComplexMatrix, generating_set: list[PolynomialElements]
+    ) -> list[Polynomial[PolynomialElements, Scalar]]:
+        """Contract SoS vectors against a generating set, giving one polynomial per row.
+
+        NumPy turns the monomials into an object array and drives their own ``__mul__``/``__add__``; its
+        stubs cannot express a matrix product whose element type comes from the operand, hence the cast.
+        """
+        return (cast("Any", sos_vectors) @ generating_set).reshape(-1).tolist()
+
     @property
     @abstractmethod
     def value(self) -> float: ...
@@ -32,7 +41,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     def __getitem__(self, monomial: PolynomialElements) -> Scalar: ...
 
     @property
-    def moment_matrix(self) -> np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]:
+    def moment_matrix(self) -> RealOrComplexMatrix:
         moment_matrices = self.moment_matrix_by_mm_id
         if len(moment_matrices) > 1:
             warnings.warn(
@@ -45,10 +54,10 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     @abstractmethod
     def moment_matrix_by_mm_id(
         self,
-    ) -> dict[int, np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]: ...
+    ) -> dict[int, RealOrComplexMatrix]: ...
 
     @property
-    def moment_matrix_multiplier(self) -> np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]:
+    def moment_matrix_multiplier(self) -> RealOrComplexMatrix:
         moment_matrix_multipliers = self.moment_matrix_multiplier_by_mm_id
         if len(moment_matrix_multipliers) > 1:
             warnings.warn(
@@ -61,7 +70,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     @abstractmethod
     def moment_matrix_multiplier_by_mm_id(
         self,
-    ) -> dict[int, np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]]]: ...
+    ) -> dict[int, RealOrComplexMatrix]: ...
 
     @property
     def localizing_matrices_equality_multipliers(
@@ -69,7 +78,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     ) -> list[
         tuple[
             Polynomial[PolynomialElements, Scalar],
-            np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+            RealOrComplexMatrix,
             list[PolynomialElements],
         ]
     ]:
@@ -91,7 +100,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
                 list[PolynomialElements],
             ]
         ],
@@ -103,7 +112,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     ) -> list[
         tuple[
             Polynomial[PolynomialElements, Scalar],
-            np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+            RealOrComplexMatrix,
         ]
     ]:
         localizing_matrices = self.localizing_matrices_inequality_by_mm_id
@@ -124,7 +133,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
             ]
         ],
     ]: ...
@@ -135,7 +144,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     ) -> list[
         tuple[
             Polynomial[PolynomialElements, Scalar],
-            np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+            RealOrComplexMatrix,
             list[PolynomialElements],
         ]
     ]:
@@ -158,7 +167,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         list[
             tuple[
                 Polynomial[PolynomialElements, Scalar],
-                np.ndarray[tuple[int, int], np.dtype[np.float64] | np.dtype[np.complex128]],
+                RealOrComplexMatrix,
                 list[PolynomialElements],
             ]
         ],
@@ -216,7 +225,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         for mm_id in self.relaxation.moment_matrices:
             sos_vectors = sos_vectors_of_hermitian_matrix(moment_matrix_multipliers[mm_id], cutoff)[0]
             n_monomials = sos_vectors.shape[1]
-            decomposition = (sos_vectors @ self.relaxation.generating_sets[mm_id][:n_monomials]).reshape(-1).tolist()
+            decomposition = self._contract_with_generating_set(
+                sos_vectors, self.relaxation.generating_sets[mm_id][:n_monomials]
+            )
             moment_matrix_term = MomentMatrixDecomposition(decomposition=decomposition)
 
             inequalities_terms = []
@@ -226,7 +237,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
             ):
                 sos_vectors = sos_vectors_of_hermitian_matrix(coefficient, cutoff)[0]
                 n_monomials = sos_vectors.shape[1]
-                decompositions = (sos_vectors @ generating_set).reshape(-1).tolist()
+                decompositions = self._contract_with_generating_set(sos_vectors, generating_set)
                 inequalities_terms.append(
                     LocalizingMomentMatrixInequalityDecomposition(generator=generator, decomposition=decompositions)
                 )
@@ -238,8 +249,8 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
             ):
                 sos_vectors_pos, sos_vectors_neg = sos_vectors_of_hermitian_matrix(coefficient, cutoff)
                 n_monomials = sos_vectors_pos.shape[1]
-                decomposition_positive = (sos_vectors_pos @ generating_set).reshape(-1).tolist()
-                decomposition_negative = (sos_vectors_neg @ generating_set).reshape(-1).tolist()
+                decomposition_positive = self._contract_with_generating_set(sos_vectors_pos, generating_set)
+                decomposition_negative = self._contract_with_generating_set(sos_vectors_neg, generating_set)
                 equalities_terms.append(
                     LocalizingMomentMatrixEqualityDecomposition(
                         generator=generator,
@@ -248,7 +259,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
                     )
                 )
 
-            moment_equalities_terms = []
+            # Annotated because the branches below append differently-specialized instances, and a
+            # bare `[]` would infer a union element type that the invariant `list` then rejects
+            moment_equalities_terms: list[SingleMomentEqualityDecomposition[PolynomialElements, Scalar]] = []
 
             for generator, coefficient in moment_equality_multipliers.get(mm_id, []):
                 if isinstance(coefficient, float):

@@ -18,8 +18,8 @@ __all__ = [
     "ComplexValuedNonCommutativeSdpRelaxation",
 ]
 
-from ncpoleon._typing import PolynomialElements, Scalar
-from ncpoleon.polynomials import Polynomial, RewritingStrategy, VectorSpaceElement
+from ncpoleon._typing import PolynomialElements, Scalar, Substituted
+from ncpoleon.polynomials import Polynomial, RewritingStrategy
 from ncpoleon.polynomials.commutative_polynomials import (
     CommutativeOperator,
     CommutativePolynomialElement,
@@ -123,17 +123,17 @@ class BaseSdpRelaxation(Generic[PolynomialElements, Scalar]):
     def rewrite(
         self, mon_or_poly: PolynomialElements | Polynomial[PolynomialElements, Scalar]
     ) -> PolynomialElements | Polynomial[PolynomialElements, Scalar]: ...
-    def split_into_real_and_imaginary_parts(
+    def get_coefficients_by_canonical(
         self, polynomial: Polynomial[PolynomialElements, Scalar]
     ) -> tuple[
-        dict[PolynomialElements, tuple[float, float | None]],
-        dict[PolynomialElements, tuple[float, float | None]] | None,
+        dict[PolynomialElements, Scalar],
+        dict[PolynomialElements, tuple[complex, complex]],
     ]: ...
     def change_variables(
         self,
         polynomial: Polynomial[PolynomialElements, Scalar],
-        mapping: dict[PolynomialElements, VectorSpaceElement[Scalar]],
-    ) -> VectorSpaceElement[Scalar]: ...
+        mapping: dict[PolynomialElements, Substituted],
+    ) -> Substituted: ...
     @property
     def generating_sets(self) -> dict[int, list[PolynomialElements]]: ...
     @property
