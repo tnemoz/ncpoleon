@@ -12,14 +12,14 @@ try:
     from mosek.fusion import Domain, Expr, Matrix, Model, ObjectiveSense, PSDVariable
 
     if TYPE_CHECKING:
-        from mosek.fusion import Expression, ExprMulScalarConst, SparseMatrix
+        from mosek.fusion import Expression, SparseMatrix
 
     _mosek_available = True
 except ImportError:
     _mosek_available = False
 
     if TYPE_CHECKING:
-        from mosek.fusion import Expr, Expression, ExprMulScalarConst, Matrix, Model, PSDVariable, SparseMatrix
+        from mosek.fusion import Expr, Expression, Matrix, Model, PSDVariable, SparseMatrix
 
 from ncpoleon._typing import PolynomialElements, Scalar
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class _ComplexExpr:
     """Pair of MOSEK Expr objects representing a complex-valued Expr"""
 
-    def __init__(self, real: Expression, imag: Expression):
+    def __init__(self, real: Expression, imag: Expression | None):
         self.real = real
         self.imag = imag
 
@@ -43,18 +43,33 @@ class _ComplexExpr:
         else:
             re, im = float(scalar), 0.0
 
+        if self.imag is None:
+            return _ComplexExpr(
+                Expr.mul(re, self.real),
+                Expr.mul(im, self.real) if im != 0.0 else None,
+            )
+
         new_real = Expr.sub(Expr.mul(re, self.real), Expr.mul(im, self.imag))
         new_imag = Expr.add(Expr.mul(re, self.imag), Expr.mul(im, self.real))
 
         return _ComplexExpr(new_real, new_imag)
 
     def __add__(self, other: _ComplexExpr) -> _ComplexExpr:
+        if self.imag is None:
+            if other.imag is None:
+                return _ComplexExpr(Expr.add(self.real, other.real), None)
+            else:
+                return _ComplexExpr(Expr.add(self.real, other.real), other.imag)
+        if other.imag is None:
+            return _ComplexExpr(Expr.add(self.real, other.real), self.imag)
         return _ComplexExpr(
             Expr.add(self.real, other.real),
             Expr.add(self.imag, other.imag),
         )
 
     def conj(self) -> _ComplexExpr:
+        if self.imag is None:
+            return self
         return _ComplexExpr(self.real, Expr.mul(-1.0, self.imag))
 
 
@@ -71,20 +86,34 @@ def convert_row_col_data_to_mosek_hermitian_matrix(
     position_matrix: tuple[list[int], list[int], list[complex]], size: int
 ) -> tuple[Matrix, Matrix, Matrix]:
     rows, cols, data = position_matrix
-    data_re = []
-    data_im = []
-    neg_data_im = []
-
-    for x in data:
-        data_re.append(x.real)
-        data_im.append(x.imag)
-        neg_data_im.append(-x.imag)
 
     return (
-        Matrix.sparse(size, size, rows, cols, data_re),
-        Matrix.sparse(size, size, rows, cols, data_im),
-        Matrix.sparse(size, size, rows, cols, neg_data_im),
+        Matrix.sparse(size, size, rows, cols, [x.real for x in data]),
+        Matrix.sparse(size, size, rows, cols, [x.imag for x in data]),
+        Matrix.sparse(size, size, rows, cols, [-x.imag for x in data]),
     )
+
+
+# TODO: add the docstring
+def convert_row_col_data_to_mosek_hermitianized_matrix(
+    position_matrix: tuple[list[int], list[int], list[complex]], size: int, *, real_part: bool
+) -> SparseMatrix:
+    rows, cols, data = position_matrix
+    data_re = [x.real for x in data]
+    data_im = [x.imag for x in data]
+
+    if real_part:
+        neg_data_im = [-x.imag for x in data]
+        real_part = Matrix.sparse(size, size, rows + cols, cols + rows, data_re + data_re)
+        imag_part = Matrix.sparse(size, size, rows + cols, cols + rows, data_im + neg_data_im)
+        neg_imag_part = Matrix.sparse(size, size, rows + cols, cols + rows, neg_data_im + data_im)
+    else:
+        neg_data_re = [-x.real for x in data]
+        real_part = Matrix.sparse(size, size, rows + cols, cols + rows, data_im + data_im)
+        imag_part = Matrix.sparse(size, size, rows + cols, cols + rows, neg_data_re + data_re)
+        neg_imag_part = Matrix.sparse(size, size, rows + cols, cols + rows, data_re + neg_data_re)
+
+    return Matrix.sparse([[real_part, neg_imag_part], [imag_part, real_part]])
 
 
 def rust_moment_matrix_to_mosek(
@@ -110,11 +139,11 @@ def rust_moment_matrix_to_mosek(
         if realness == Realness.Real:
             mosek_moment_matrix_re = Expr.add(
                 mosek_moment_matrix_re,
-                Expr.mul(mapped_variables[mon], pos_matrix[0]),
+                Expr.mul(mapped_variables[mon].real, pos_matrix[0]),
             )
             mosek_moment_matrix_im = Expr.add(
                 mosek_moment_matrix_im,
-                Expr.mul(mapped_variables[mon], pos_matrix[1]),
+                Expr.mul(mapped_variables[mon].real, pos_matrix[1]),
             )
         else:
             mosek_moment_matrix_re = Expr.add(
@@ -159,36 +188,6 @@ def rust_moment_matrix_to_mosek(
 
 def get_mosek_psd_variable(model: Model, name: str, size: int, symmetric: bool) -> PSDVariable:
     return model.variable(name, Domain.inPSDCone(size if symmetric else 2 * size))
-
-
-def mosek_hermitianize(M_re: SparseMatrix, M_im: SparseMatrix) -> ExprMulScalarConst:
-    M_re_plus_M_re_T = Expr.add(Expr.constTerm(M_re), Expr.constTerm(M_re.transpose()))
-    M_im_minus_M_im_T = Expr.sub(Expr.constTerm(M_im), Expr.constTerm(M_im.transpose()))
-
-    return Expr.mul(
-        Expr.vstack(
-            [
-                Expr.hstack([M_re_plus_M_re_T, Expr.mul(-1.0, M_im_minus_M_im_T)]),
-                Expr.hstack([M_im_minus_M_im_T, M_re_plus_M_re_T]),
-            ]
-        ),
-        1 / 2,
-    )
-
-
-def mosek_antihermitianize(M_re: SparseMatrix, M_im: SparseMatrix) -> ExprMulScalarConst:
-    M_re_minus_M_re_T = Expr.sub(Expr.constTerm(M_re), Expr.constTerm(M_re.transpose()))
-    minus_M_im_plus_M_im_T = Expr.mul(-1.0, Expr.add(Expr.constTerm(M_im), Expr.constTerm(M_im.transpose())))
-
-    return Expr.mul(
-        Expr.vstack(
-            [
-                Expr.hstack([minus_M_im_plus_M_im_T, Expr.mul(-1.0, M_re_minus_M_re_T)]),
-                Expr.hstack([M_re_minus_M_re_T, minus_M_im_plus_M_im_T]),
-            ]
-        ),
-        1 / 2,
-    )
 
 
 # FIXME: this can probably be simplified by defining ComplexVariables and HermitianVariables just like PICOS
@@ -240,14 +239,18 @@ def to_mosek(
 
         for moment_matrix_id, moment_matrix in sdp.moment_matrices.items():
             for monomial, (_position_matrix, realness) in moment_matrix.as_row_col_data_format().items():
-                new_variable = (
-                    M.variable(str(monomial), Domain.unbounded())
-                    if realness == Realness.Real
-                    else _ComplexExpr(
+                if is_problem_real_valued:
+                    new_variable = M.variable(str(monomial), Domain.unbounded())
+                elif realness == Realness.Real:
+                    new_variable = _ComplexExpr(
+                        M.variable(str(monomial), Domain.unbounded()),
+                        None,
+                    )
+                else:
+                    new_variable = _ComplexExpr(
                         M.variable(f"{str(monomial)}_re", Domain.unbounded()),
                         M.variable(f"{str(monomial)}_im", Domain.unbounded()),
                     )
-                )
 
                 mapped_variables[monomial] = new_variable
 
@@ -284,11 +287,18 @@ def to_mosek(
         for index, (poly, value) in enumerate(sdp.moment_equalities):
             changed = sdp.change_variables(poly, mapped_variables)
 
-            if isinstance(changed, _ComplexExpr):
+            if not is_problem_real_valued:
                 M.constraint(f"ME-{index}_re", changed.real, Domain.equalsTo(value.real))
                 logger.debug(f"Added constraint {changed.real} == {value.real}.")
-                M.constraint(f"ME-{index}_im", changed.imag, Domain.equalsTo(value.imag))
-                logger.debug(f"Added constraint {changed.imag} == {value.imag}.")
+
+                if changed.imag is not None:
+                    M.constraint(f"ME-{index}_im", changed.imag, Domain.equalsTo(value.imag))
+                    logger.debug(f"Added constraint {changed.imag} == {value.imag}.")
+                elif value.imag != 0.0:
+                    raise ValueError(
+                        f"Moment equality {index} has an identically real left-hand side but the right-hand"
+                        f" side ({value}) isn't real-valued, so it can never be satisfied."
+                    )
             else:
                 M.constraint(f"ME-{index}", changed, Domain.equalsTo(value))
                 logger.debug(f"Added constraint {changed} == {value}.")
@@ -296,7 +306,7 @@ def to_mosek(
         for index, (poly, value) in enumerate(sdp.moment_inequalities):
             changed = sdp.change_variables(poly, mapped_variables)
 
-            if isinstance(changed, _ComplexExpr):
+            if not is_problem_real_valued:
                 M.constraint(f"MI-{index}", changed.real, Domain.greaterThan(value))
                 logger.debug(f"Added constraint {changed.real} >= {value}.")
             else:
@@ -306,7 +316,7 @@ def to_mosek(
         objective = sdp.change_variables(sdp.objective, mapped_variables)
         M.objective(
             ObjectiveSense.Minimize if objective_direction == "min" else ObjectiveSense.Maximize,
-            objective.real if isinstance(objective, _ComplexExpr) else objective,
+            objective.real if not is_problem_real_valued else objective,
         )
     else:
         logger.info("Exporting to a dual MOSEK problem.")
@@ -409,16 +419,26 @@ def to_mosek(
                     )
                     new_constraint = Expr.mul(Expr.dot(Y, Matrix.sparse([[F_re, F_im_neg], [F_im, F_re]])), 1 / 2)
                 else:  # position matrix only contains the position of the canonical monomial
-                    F_re, F_im, _F_im_neg = convert_row_col_data_to_mosek_hermitian_matrix(
-                        pos_matrix, moment_matrix.size
+                    # We have to multiply by 1/2 to preserve the dot product when considering the representation as
+                    # symmetric matrices
+                    new_constraint_re = Expr.mul(
+                        Expr.dot(
+                            Y,
+                            convert_row_col_data_to_mosek_hermitianized_matrix(
+                                pos_matrix, moment_matrix.size, real_part=True
+                            ),
+                        ),
+                        1 / 2,
                     )
-                    # Even though the trace of the representation is twice the trace of the original matrix, since we
-                    # need to consider F + F^dagger in the trace and since the hermitianize function actually returns
-                    # the representation of (F + F^dagger) / 2, we can simply consider .dot here without adding the 1/2
-                    # factor
-                    new_constraint_re = Expr.dot(Y, mosek_hermitianize(F_re, F_im))
-                    # The above comment also applies to antihermitianize
-                    new_constraint_im = Expr.dot(Y, mosek_antihermitianize(F_re, F_im))
+                    new_constraint_im = Expr.mul(
+                        Expr.dot(
+                            Y,
+                            convert_row_col_data_to_mosek_hermitianized_matrix(
+                                pos_matrix, moment_matrix.size, real_part=False
+                            ),
+                        ),
+                        1 / 2,
+                    )
 
                 for lagrange_mutlipliers, localizing_matrices, precomputed_row_cols in zip(
                     [Ps, Qs],
@@ -445,17 +465,34 @@ def to_mosek(
                                 )
                                 new_constraint = Expr.add(
                                     new_constraint,
-                                    Expr.mul(Expr.dot(multiplier, Matrix.sparse([[G_re, G_im_neg], [G_im, G_re]])), 1 / 2),
+                                    Expr.mul(
+                                        Expr.dot(multiplier, Matrix.sparse([[G_re, G_im_neg], [G_im, G_re]])), 1 / 2
+                                    ),
                                 )
                             else:
-                                G_re, G_im, _G_im_neg = convert_row_col_data_to_mosek_hermitian_matrix(
-                                    pos_matrix_localizing, localizing_matrix.size
-                                )
                                 new_constraint_re = Expr.add(
-                                    new_constraint_re, Expr.dot(multiplier, mosek_hermitianize(G_re, G_im))
+                                    new_constraint_re,
+                                    Expr.mul(
+                                        Expr.dot(
+                                            multiplier,
+                                            convert_row_col_data_to_mosek_hermitianized_matrix(
+                                                pos_matrix_localizing, localizing_matrix.size, real_part=True
+                                            ),
+                                        ),
+                                        1 / 2,
+                                    ),
                                 )
                                 new_constraint_im = Expr.add(
-                                    new_constraint_im, Expr.dot(multiplier, mosek_antihermitianize(G_re, G_im))
+                                    new_constraint_im,
+                                    Expr.mul(
+                                        Expr.dot(
+                                            multiplier,
+                                            convert_row_col_data_to_mosek_hermitianized_matrix(
+                                                pos_matrix_localizing, localizing_matrix.size, real_part=False
+                                            ),
+                                        ),
+                                        1 / 2,
+                                    ),
                                 )
 
                 for lambda_m, ((poly_re, poly_im), _) in zip(lambdas, split_moment_inequalities):

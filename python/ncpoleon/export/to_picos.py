@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, overload, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -25,22 +25,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@overload
 def convert_row_col_data_to_coo_matrix(
     position_matrix: tuple[list[int], list[int], list[Scalar]], size: int
-) -> coo_matrix: ...
-
-
-@overload
-def convert_row_col_data_to_coo_matrix(position_matrix: None, size: int) -> None: ...
-
-
-def convert_row_col_data_to_coo_matrix(
-    position_matrix: tuple[list[int], list[int], list[Scalar]] | None, size: int
-) -> coo_matrix | None:
-    if position_matrix is None:
-        return None
-
+) -> coo_matrix:
     rows, cols, data = position_matrix
 
     return coo_matrix((np.array(data), (np.array(rows), np.array(cols))), shape=(size, size))
@@ -147,16 +134,28 @@ def to_picos(
         #  at once. That would reduce conversion costs
 
         for index, (poly, value) in enumerate(sdp.moment_equalities):
-            constraints[f"ME-{index}"] = problem.add_constraint(sdp.change_variables(poly, mapped_variables) == value)
+            changed = sdp.change_variables(poly, mapped_variables)
+
+            if not changed.complex and value.imag != 0.0:
+                raise ValueError(
+                    f"Moment equality {index} has an identically real left-hand side but the right-hand side"
+                    f" ({value}) isn't real-valued, so it can never be satisfied."
+                )
+
+            constraints[f"ME-{index}"] = problem.add_constraint(changed == value)
             logger.debug(f"Added moment constraint {poly} == {value} for moment matrix id {moment_matrix_id}.")
 
         for index, (poly, value) in enumerate(sdp.moment_inequalities):
-            constraints[f"MI-{index}"] = problem.add_constraint(sdp.change_variables(poly, mapped_variables) >= value)
+            changed = sdp.change_variables(poly, mapped_variables)
+
+            # A moment inequality always has a real bound, so it constrains the real part: a non-hermitian polynomial
+            # yields a complex expression, which PICOS refuses to order.
+            constraints[f"MI-{index}"] = problem.add_constraint(changed.real >= value)
             logger.debug(f"Added moment constraint {poly} >= {value} for moment matrix id {moment_matrix_id}.")
 
         problem.set_objective(objective_direction, sdp.change_variables(sdp.objective, mapped_variables))
     else:
-        logger.info("Exporting to a dual Picos problem.")
+        logger.info("Exporting to a dual PICOS problem.")
 
         is_problem_real_valued = sdp.is_real
         operator_inequalities = sdp.localising_moment_matrices_inequalities
