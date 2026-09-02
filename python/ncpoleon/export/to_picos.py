@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -147,14 +147,6 @@ def to_picos(
 
         for index, (poly, value) in enumerate(sdp.moment_equalities):
             changed = sdp.change_variables(poly, mapped_variables)
-
-            # Every float is a valid complex; reading `.imag` off a bare `float` confuses the type checker
-            if not changed.complex and cast("complex", value).imag != 0.0:
-                raise ValueError(
-                    f"Moment equality {index} has an identically real left-hand side but the right-hand side"
-                    f" ({value}) isn't real-valued, so it can never be satisfied."
-                )
-
             constraints[f"ME-{index}"] = problem.add_constraint(changed == value)
             logger.debug(f"Added moment constraint {poly} == {value} for moment matrix id {moment_matrix_id}.")
 
@@ -277,11 +269,11 @@ def to_picos(
                     (poly_moment_ineq_real_monomials_coefficients, poly_moment_ineq_complex_monomials_coefficients),
                     _scalar,
                 ) in zip(lambdas, split_moment_inequalities):
-                    assert len(poly_moment_ineq_complex_monomials_coefficients) == 0
-
                     if realness == Realness.Real:
                         beta = poly_moment_ineq_real_monomials_coefficients.get(monomial, 0.0)
                     else:
+                        # A moment inequality is hermitian, so the adjoint monomial carries the conjugate
+                        # coefficient and the canonical one alone determines the contribution
                         beta, _beta_conj = poly_moment_ineq_complex_monomials_coefficients.get(
                             monomial, (0.0 + 0.0j, 0.0 + 0.0j)
                         )

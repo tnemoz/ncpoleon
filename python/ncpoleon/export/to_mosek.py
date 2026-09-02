@@ -318,11 +318,6 @@ def fill_complex_primal_model(
         if changed.imag is not None:
             model.constraint(f"ME-{index}_im", changed.imag, Domain.equalsTo(value.imag))
             logger.debug(f"Added constraint {changed.imag} == {value.imag}.")
-        elif value.imag != 0.0:
-            raise ValueError(
-                f"Moment equality {index} has an identically real left-hand side but the right-hand"
-                f" side ({value}) isn't real-valued, so it can never be satisfied."
-            )
 
     for index, (poly, value) in enumerate(sdp.moment_inequalities):
         # A moment inequality always has a real bound, so it constrains the real part
@@ -605,12 +600,12 @@ def fill_complex_dual_model(
             for lambda_m, ((real_coefficients, complex_coefficients), _scalar) in zip(
                 lambdas, split_moment_inequalities, strict=True
             ):
-                assert len(complex_coefficients) == 0
-
                 if realness == Realness.Real:
                     beta = complex(real_coefficients.get(monomial, 0.0)).real
                     constraint_row = constraint_row + _ComplexExpr(Expr.mul(lambda_m, beta), None)
                 else:
+                    # A moment inequality is hermitian, so the adjoint monomial carries the conjugate coefficient and
+                    # the pair contributes twice the real part of `beta * y`, on the scale of the objective row below
                     beta_complex, _beta_conj = complex_coefficients.get(monomial, (0.0 + 0.0j, 0.0 + 0.0j))
                     constraint_row = constraint_row + _ComplexExpr(
                         Expr.mul(Expr.mul(lambda_m, beta_complex.real), 2.0),
@@ -635,7 +630,7 @@ def fill_complex_dual_model(
                         ),
                         Expr.sub(
                             Expr.mul(nu_n.real, (delta - eps).imag),
-                            Expr.mul(nu_n_imag, (delta + eps).real),
+                            Expr.mul(nu_n_imag, (delta - eps).real),
                         ),
                     )
 

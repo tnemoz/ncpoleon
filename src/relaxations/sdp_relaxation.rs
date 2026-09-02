@@ -996,7 +996,7 @@ impl_sdp_relaxation_pymethods!(
 type PolynomialWithOptionalGeneratingSet<MonomialType, Scalar> =
     (Polynomial<MonomialType, Scalar>, Option<Vec<MonomialType>>);
 
-impl<Data: Ord + Clone, Scalar: PolynomialDtype> SdpRelaxation<Monomial<Data>, Scalar>
+impl<Data: Ord + Clone, Scalar: PolynomialDtype + Into<Complex<f64>>> SdpRelaxation<Monomial<Data>, Scalar>
 where
     Polynomial<Monomial<Data>, Scalar>: PolynomialTrait,
     Monomial<Data>: RewritingTrait<Monomial<Data>> + OneWithMomentMatrixId + AdjointTrait,
@@ -1476,6 +1476,40 @@ where
 
             self.moment_matrices.insert(moment_matrix_id, new_moment_matrix);
             self.generating_sets.insert(moment_matrix_id, monomials_sets.iter().flatten().cloned().collect());
+        }
+
+        debug!("Checking the complex feasibility of moment equalities.");
+        if !self.objective.is_real() {
+            // Only check for complex-valued problems
+            for (moment_equality, scalar) in self.moment_equalities.iter() {
+                if Into::<Complex<f64>>::into(*scalar).im != 0.0
+                    && (moment_equality - moment_equality.adjoint())
+                        .rewrite(self.substitution_strategy, &self.substitutions)
+                        .map_err(PyValueError::new_err)?
+                        .is_zero()
+                {
+                    return Err(PyValueError::new_err(format!(
+                        "The moment equality constraint {} = {} can't be satisfied since the polynomial is hermitian \
+                        and thus real-valued.",
+                        moment_equality, scalar
+                    )));
+                }
+            }
+        }
+
+        for (moment_equality, scalar) in self.moment_equalities.iter() {
+            if Into::<Complex<f64>>::into(*scalar).re != 0.0
+                && (moment_equality + moment_equality.adjoint())
+                    .rewrite(self.substitution_strategy, &self.substitutions)
+                    .map_err(PyValueError::new_err)?
+                    .is_zero()
+            {
+                return Err(PyValueError::new_err(format!(
+                    "The moment equality constraint {} = {} can't be satisfied since the polynomial is antihermitian \
+                    and thus purely imaginary (or identically nil in a real-valued problem).",
+                    moment_equality, scalar
+                )));
+            }
         }
 
         info!("Finished setting relaxation.");
