@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
+from ncpoleon.relaxations import Canonicality, Realness
 from ncpoleon.solve.solution import BaseSolution
 
 if TYPE_CHECKING:
-    from mosek.fusion import Model
+    from mosek.fusion import Constraint, Model, Variable
 
     from ncpoleon.polynomials import Polynomial
     from ncpoleon.relaxations import BaseSdpRelaxation
@@ -31,6 +32,25 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
         self._objective_sense = objective_sense
 
+    # MOSEK returns None rather than raising when a model holds nothing under the
+    # given name, so every lookup of an item the solver is known to have built
+    # goes through these two helpers instead of repeating the None check
+    def _constraint(self, name: str) -> Constraint:
+        constraint = self._model.getConstraint(name)
+
+        if constraint is None:
+            raise KeyError(f"The model has no constraint named {name}.")
+
+        return constraint
+
+    def _variable(self, name: str) -> Variable:
+        variable = self._model.getVariable(name)
+
+        if variable is None:
+            raise KeyError(f"The model has no variable named {name}.")
+
+        return variable
+
     @property
     def value(self) -> np.float64:
         return self._model.primalObjValue()
@@ -41,35 +61,35 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
     def __getitem__(self, monomial: PolynomialElements) -> Scalar:
         rewritten_monomial = self._relaxation.rewrite(monomial)
-        canonical_monomial, is_adjoint, is_real_valued = self._relaxation.moment_matrices[
+        canonical_monomial, canonicality, realness = self._relaxation.moment_matrices[
             rewritten_monomial.moment_matrix_id
         ].get_canonical(rewritten_monomial)
 
         if self._primal:
-            if is_real_valued:
-                return self._model.getVariable(str(canonical_monomial)).level()[0]
-            if is_adjoint:
+            if realness == Realness.Real:
+                return self._variable(str(canonical_monomial)).level()[0]
+            if canonicality == Canonicality.Adjoint:
                 return (
-                    self._model.getVariable(f"{str(canonical_monomial)}_re").level()[0]
-                    - self._model.getVariable(f"{str(canonical_monomial)}_im").level()[0] * 1j
+                    self._variable(f"{str(canonical_monomial)}_re").level()[0]
+                    - self._variable(f"{str(canonical_monomial)}_im").level()[0] * 1j
                 )
             return (
-                self._model.getVariable(f"{str(canonical_monomial)}_re").level()[0]
-                + self._model.getVariable(f"{str(canonical_monomial)}_im").level()[0] * 1j
+                self._variable(f"{str(canonical_monomial)}_re").level()[0]
+                + self._variable(f"{str(canonical_monomial)}_im").level()[0] * 1j
             )
         else:
             sign = 1 if self._objective_sense == "min" else -1
 
-            if is_real_valued:
-                return self._model.getConstraint(f"M-{canonical_monomial}").dual()[0] * sign
-            if is_adjoint:
+            if realness == Realness.Real:
+                return self._constraint(f"M-{canonical_monomial}").dual()[0] * sign
+            if canonicality == Canonicality.Adjoint:
                 return (
-                    self._model.getConstraint(f"M-{canonical_monomial}-re").dual()[0]
-                    - self._model.getConstraint(f"M-{canonical_monomial}-im").dual()[0] * 1j
+                    self._constraint(f"M-{canonical_monomial}-re").dual()[0]
+                    - self._constraint(f"M-{canonical_monomial}-im").dual()[0] * 1j
                 ) * sign
             return (
-                self._model.getConstraint(f"M-{canonical_monomial}-re").dual()[0]
-                + self._model.getConstraint(f"M-{canonical_monomial}-im").dual()[0] * 1j
+                self._constraint(f"M-{canonical_monomial}-re").dual()[0]
+                + self._constraint(f"M-{canonical_monomial}-im").dual()[0] * 1j
             ) * sign
 
     @property
@@ -82,15 +102,19 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             size = moment_matrix.size
 
             if self._primal:
-                moment_matrix_level = self._model.getConstraint(f"MM-{id}").level()
+                moment_matrix_level = self._constraint(f"MM-{id}").level()
             else:
                 sign = 1 if self._objective_sense == "max" else -1
-                moment_matrix_level = self._model.getVariable(f"Y_{id}").dual() * sign
+                moment_matrix_level = self._variable(f"Y_{id}").dual() * sign
 
             if self._relaxation.is_real:
                 res[id] = moment_matrix_level.reshape(size, size)
             else:
                 moment_matrix_level = moment_matrix_level.reshape(2 * size, 2 * size)
+
+                if not self._primal:  # Needed because of the Hermitian into Symmetric embedding
+                    moment_matrix_level *= 2
+
                 res[id] = moment_matrix_level[:size, :size] + 1j * moment_matrix_level[size:, :size]
 
         return res
@@ -106,14 +130,18 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
             if self._primal:
                 sign = 1 if self._objective_sense == "min" else -1
-                moment_matrix_dual = self._model.getConstraint(f"MM-{id}").dual() * sign
+                moment_matrix_dual = self._constraint(f"MM-{id}").dual() * sign
             else:
-                moment_matrix_dual = self._model.getVariable(f"Y_{id}").level()
+                moment_matrix_dual = self._variable(f"Y_{id}").level()
 
             if self._relaxation.is_real:
                 res[id] = moment_matrix_dual.reshape(size, size)
             else:
                 moment_matrix_dual = moment_matrix_dual.reshape(2 * size, 2 * size)
+
+                if self._primal:  # Needed because of the Hermitian into Symmetric embedding
+                    moment_matrix_dual *= 2
+
                 res[id] = moment_matrix_dual[:size, :size] + 1j * moment_matrix_dual[size:, :size]
 
         return res
@@ -146,11 +174,10 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 # lower-triangular matrix for the dual, which we have to hermitianize further down
                 if self._primal:
                     sign = 1 if self._objective_sense == "min" else -1
-                    localizing_moment_matrix_dual = self._model.getConstraint(f"LMME-{id}-{index}").dual() * sign
+                    localizing_moment_matrix_dual = self._constraint(f"LMME-{id}-{index}").dual() * sign
                 else:
                     localizing_moment_matrix_dual = (
-                        self._model.getVariable(f"Q_({id}, {index})^0").level()
-                        - self._model.getVariable(f"Q_({id}, {index})^1").level()
+                        self._variable(f"Q_({id}, {index})^0").level() - self._variable(f"Q_({id}, {index})^1").level()
                     )
 
                 if self._relaxation.is_real:
@@ -164,6 +191,10 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                     localizing_moment_matrix_dual = localizing_moment_matrix_dual.reshape(
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
+
+                    if self._primal:  # Needed because of the Hermitian into Symmetric embedding
+                        localizing_moment_matrix_dual *= 2
+
                     to_hermitianize = (
                         localizing_moment_matrix_dual[: localizing_moment_matrix.size, : localizing_moment_matrix.size]
                         + 1j
@@ -205,10 +236,10 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                 zip(localizing_moment_matrices_inequalities_id, self._relaxation.inequalities.get(id, []), strict=True)
             ):
                 if self._primal:
-                    localizing_moment_matrix_level = self._model.getConstraint(f"LMMI-{id}-{index}").level()
+                    localizing_moment_matrix_level = self._constraint(f"LMMI-{id}-{index}").level()
                 else:
                     sign = 1 if self._objective_sense == "max" else -1
-                    localizing_moment_matrix_level = self._model.getVariable(f"P_({id}, {index})").dual() * sign
+                    localizing_moment_matrix_level = self._variable(f"P_({id}, {index})").dual() * sign
 
                 if self._relaxation.is_real:
                     to_add.append(
@@ -223,6 +254,10 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                     localizing_moment_matrix_level = localizing_moment_matrix_level.reshape(
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
+
+                    if not self._primal:  # Needed because of the Hermitian into Symmetric embedding
+                        localizing_moment_matrix_level *= 2
+
                     to_add.append(
                         (
                             inequality_constraint,
@@ -266,9 +301,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             ):
                 if self._primal:
                     sign = 1 if self._objective_sense == "min" else -1
-                    localizing_moment_matrix_dual = self._model.getConstraint(f"LMMI-{id}-{index}").dual() * sign
+                    localizing_moment_matrix_dual = self._constraint(f"LMMI-{id}-{index}").dual() * sign
                 else:
-                    localizing_moment_matrix_dual = self._model.getVariable(f"P_({id}, {index})").level()
+                    localizing_moment_matrix_dual = self._variable(f"P_({id}, {index})").level()
 
                 if self._relaxation.is_real:
                     to_add.append(
@@ -284,6 +319,10 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                     localizing_moment_matrix_dual = localizing_moment_matrix_dual.reshape(
                         2 * localizing_moment_matrix.size, 2 * localizing_moment_matrix.size
                     )
+
+                    if self._primal:  # Needed because of the Hermitian into Symmetric embedding
+                        localizing_moment_matrix_dual *= 2
+
                     to_add.append(
                         (
                             inequality_constraint,
@@ -312,27 +351,35 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             if self._primal:
                 sign = 1 if self._objective_sense == "min" else -1
                 if self._relaxation.is_real:
-                    res.append((polynomial_constraint, self._model.getConstraint(f"ME-{index}").dual()[0] * sign))
+                    res.append((polynomial_constraint, self._constraint(f"ME-{index}").dual()[0] * sign))
                 else:
-                    res.append(
-                        (
-                            polynomial_constraint,
+                    # A moment equality with a real coefficient has no imaginary
+                    # part to constrain, so the model may hold the real one alone
+                    im_constraint = self._model.getConstraint(f"ME-{index}_im")
+
+                    if im_constraint is not None:
+                        res.append(
                             (
-                                self._model.getConstraint(f"ME-{index}_re").dual()[0]
-                                + self._model.getConstraint(f"ME-{index}_im").dual()[0] * 1j
+                                polynomial_constraint,
+                                (self._constraint(f"ME-{index}_re").dual()[0] + im_constraint.dual()[0] * 1j) * sign,
                             )
-                            * sign,
                         )
-                    )
+                    else:
+                        res.append(
+                            (
+                                polynomial_constraint,
+                                self._constraint(f"ME-{index}_re").dual()[0] * sign,
+                            )
+                        )
             else:
                 if self._relaxation.is_real:
-                    res.append((polynomial_constraint, self._model.getVariable(f"nu_{index}").level()[0]))
+                    res.append((polynomial_constraint, self._variable(f"nu_{index}").level()[0]))
                 else:
                     res.append(
                         (
                             polynomial_constraint,
-                            self._model.getVariable(f"nu_{index}^re").level()[0]
-                            + self._model.getVariable(f"nu_{index}^im").level()[0] * 1j,
+                            self._variable(f"nu_{index}^re").level()[0]
+                            + self._variable(f"nu_{index}^im").level()[0] * 1j,
                         )
                     )
 
@@ -345,8 +392,8 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_inequalities):
             if self._primal:
                 sign = 1 if self._objective_sense == "min" else -1
-                res.append((polynomial_constraint, self._model.getConstraint(f"MI-{index}").dual()[0] * sign))
+                res.append((polynomial_constraint, self._constraint(f"MI-{index}").dual()[0] * sign))
             else:
-                res.append((polynomial_constraint, self._model.getVariable(f"lambda_{index}").level()[0]))
+                res.append((polynomial_constraint, self._variable(f"lambda_{index}").level()[0]))
 
         return res

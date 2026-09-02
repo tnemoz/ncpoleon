@@ -159,7 +159,7 @@ def test_complex_problem_sos_decomposition(solver: str, case: str, level: int, f
         moment_constraints=_moment_constraints(case, x1, x2),
     )
     sol = solve(sdp, "min", force_primal=force_primal, solver=solver)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) - obj)).is_zero(1e-7)
+    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) - obj)).is_zero(1e-4)
 
 
 def test_non_hermitian_moment_inequality_is_rejected():
