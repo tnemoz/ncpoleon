@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
+from ncpoleon._typing import MonomialType, RealOrComplexMatrix, Scalar
 from ncpoleon.solve.solution import BaseSolution
 from ncpoleon.solve.sos_decomposition import SoSDecomposition
 from ncpoleon.utils import is_mosek_available
@@ -40,8 +40,8 @@ SOLVERS = [pytest.param(solver, marks=[mark]) for solver, mark in SOLVER_SKIPS.i
 
 
 def _reduce_sos_decomposition(
-    sos: SoSDecomposition[PolynomialElements, Scalar],
-) -> Polynomial[PolynomialElements, Scalar]:
+    sos: SoSDecomposition[MonomialType, Scalar],
+) -> Polynomial[MonomialType, Scalar]:
     res = sum([poly.adjoint() * poly for poly in sos.moment_matrix_term.decomposition])
 
     for localizing_term in sos.equalities_terms:
@@ -62,10 +62,10 @@ def _reduce_sos_decomposition(
 
 
 def _build_moment_matrix_from_moments(
-    generating_set: list[PolynomialElements],
-    poly: Polynomial[PolynomialElements, Scalar],
-    relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
-    mapping: dict[PolynomialElements, Scalar],
+    generating_set: list[MonomialType],
+    poly: Polynomial[MonomialType, Scalar],
+    relaxation: BaseSdpRelaxation[MonomialType, Scalar],
+    mapping: dict[MonomialType, Scalar],
 ) -> RealOrComplexMatrix:
     res = np.empty((len(generating_set), len(generating_set)), dtype=complex)
 
@@ -77,7 +77,7 @@ def _build_moment_matrix_from_moments(
 
 
 def consistency_check(
-    relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
+    relaxation: BaseSdpRelaxation[MonomialType, Scalar],
     solution: BaseSolution,
     *,
     objective_sense: str,

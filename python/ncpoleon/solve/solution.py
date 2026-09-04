@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Generic
 
 import numpy as np
 
-from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
+from ncpoleon._typing import MonomialType, RealOrComplexMatrix, Scalar
 from ncpoleon.solve.utils import sos_vectors_of_hermitian_matrix
 
 from .sos_decomposition import (
@@ -23,13 +23,13 @@ if TYPE_CHECKING:
     from ncpoleon.relaxations import BaseSdpRelaxation
 
 
-class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
+class BaseSolution(ABC, Generic[MonomialType, Scalar]):
     @property
     @abstractmethod
     def value(self) -> float: ...
 
     @abstractmethod
-    def __getitem__(self, monomial: PolynomialElements) -> Scalar: ...
+    def __getitem__(self, monomial: MonomialType) -> Scalar: ...
 
     @property
     def moment_matrix(self) -> RealOrComplexMatrix:
@@ -68,9 +68,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         self,
     ) -> list[
         tuple[
-            Polynomial[PolynomialElements, Scalar],
+            Polynomial[MonomialType, Scalar],
             RealOrComplexMatrix,
-            list[PolynomialElements],
+            list[MonomialType],
         ]
     ]:
         localizing_matrices_multipliers = self.localizing_matrices_equality_multipliers_by_mm_id
@@ -90,9 +90,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         int,
         list[
             tuple[
-                Polynomial[PolynomialElements, Scalar],
+                Polynomial[MonomialType, Scalar],
                 RealOrComplexMatrix,
-                list[PolynomialElements],
+                list[MonomialType],
             ]
         ],
     ]: ...
@@ -102,9 +102,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         self,
     ) -> list[
         tuple[
-            Polynomial[PolynomialElements, Scalar],
+            Polynomial[MonomialType, Scalar],
             RealOrComplexMatrix,
-            list[PolynomialElements],
+            list[MonomialType],
         ]
     ]:
         localizing_matrices = self.localizing_matrices_inequality_by_mm_id
@@ -124,9 +124,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         int,
         list[
             tuple[
-                Polynomial[PolynomialElements, Scalar],
+                Polynomial[MonomialType, Scalar],
                 RealOrComplexMatrix,
-                list[PolynomialElements],
+                list[MonomialType],
             ]
         ],
     ]: ...
@@ -136,9 +136,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         self,
     ) -> list[
         tuple[
-            Polynomial[PolynomialElements, Scalar],
+            Polynomial[MonomialType, Scalar],
             RealOrComplexMatrix,
-            list[PolynomialElements],
+            list[MonomialType],
         ]
     ]:
         localizing_matrices_multipliers = self.localizing_matrices_inequality_multipliers_by_mm_id
@@ -159,9 +159,9 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
         int,
         list[
             tuple[
-                Polynomial[PolynomialElements, Scalar],
+                Polynomial[MonomialType, Scalar],
                 RealOrComplexMatrix,
-                list[PolynomialElements],
+                list[MonomialType],
             ]
         ],
     ]: ...
@@ -170,19 +170,19 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
     @abstractmethod
     def moment_equalities_multipliers(
         self,
-    ) -> list[tuple[Polynomial[PolynomialElements, Scalar], float | complex]]: ...
+    ) -> list[tuple[Polynomial[MonomialType, Scalar], float | complex]]: ...
 
     @property
     @abstractmethod
-    def moment_inequalities_multipliers(self) -> list[tuple[Polynomial[PolynomialElements, Scalar], float]]: ...
+    def moment_inequalities_multipliers(self) -> list[tuple[Polynomial[MonomialType, Scalar], float]]: ...
 
     @property
     @abstractmethod
-    def relaxation(self) -> BaseSdpRelaxation[PolynomialElements, Scalar]: ...
+    def relaxation(self) -> BaseSdpRelaxation[MonomialType, Scalar]: ...
 
     def get_sos_decomposition(
         self, *, cutoff: float = 0.0, delta: float = 0.0
-    ) -> SoSDecomposition[PolynomialElements, Scalar]:
+    ) -> SoSDecomposition[MonomialType, Scalar]:
         sos_decompositions = self.get_sos_decomposition_by_mm_id(cutoff=cutoff, delta=delta)
         if len(sos_decompositions) > 1:
             warnings.warn(
@@ -194,8 +194,8 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
 
     def get_sos_decomposition_by_mm_id(
         self, *, cutoff: float = 0.0, delta: float = 0.0
-    ) -> dict[int, SoSDecomposition[PolynomialElements, Scalar]]:
-        res: dict[int, SoSDecomposition[PolynomialElements, Scalar]] = {}
+    ) -> dict[int, SoSDecomposition[MonomialType, Scalar]]:
+        res: dict[int, SoSDecomposition[MonomialType, Scalar]] = {}
         moment_matrix_multipliers = self.moment_matrix_multiplier_by_mm_id
         localizing_moment_matrices_multipliers_equality = self.localizing_matrices_equality_multipliers_by_mm_id
         localizing_moment_matrices_multipliers_inequality = self.localizing_matrices_inequality_multipliers_by_mm_id
@@ -271,7 +271,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
 
             # Annotated because the branches below append differently-specialized instances, and a
             # bare `[]` would infer a union element type that the invariant `list` then rejects
-            moment_equalities_terms: list[SingleMomentEqualityDecomposition[PolynomialElements, Scalar]] = []
+            moment_equalities_terms: list[SingleMomentEqualityDecomposition[MonomialType, Scalar]] = []
 
             for generator, coefficient in moment_equality_multipliers.get(mm_id, []):
                 to_hermitianize = coefficient * generator.adjoint()
@@ -292,7 +292,7 @@ class BaseSolution(ABC, Generic[PolynomialElements, Scalar]):
                 if not to_add.is_zero():
                     moment_inequalities_terms.append(SingleMomentInequalityDecomposition(term=to_add))
 
-            res[mm_id] = SoSDecomposition[PolynomialElements, Scalar](
+            res[mm_id] = SoSDecomposition[MonomialType, Scalar](
                 moment_matrix_term=moment_matrix_term,
                 equalities_terms=equalities_terms,
                 inequalities_terms=inequalities_terms,

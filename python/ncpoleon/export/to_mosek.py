@@ -22,7 +22,7 @@ except ImportError:
     if TYPE_CHECKING:
         from mosek.fusion import Expr, Expression, Matrix, Model, PSDVariable, SparseMatrix
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import MonomialType, Scalar
 
 if TYPE_CHECKING:
     from ncpoleon.relaxations import BaseSdpRelaxation, MomentMatrix
@@ -119,8 +119,8 @@ def convert_row_col_data_to_mosek_hermitianized_matrix(
 
 
 def real_moment_matrix_to_mosek(
-    moment_matrix: MomentMatrix[PolynomialElements, float],
-    mapped_variables: dict[PolynomialElements, Expression],
+    moment_matrix: MomentMatrix[MonomialType, float],
+    mapped_variables: dict[MonomialType, Expression],
 ) -> Expression:
     """Build a (localising) moment matrix of a real-valued problem as a symmetric MOSEK expression."""
     # The accumulator starts as `0` and is folded with `Expr.add`, which promotes the seed on the first iteration. It
@@ -136,8 +136,8 @@ def real_moment_matrix_to_mosek(
 
 
 def complex_moment_matrix_to_mosek(
-    moment_matrix: MomentMatrix[PolynomialElements, complex],
-    mapped_variables: dict[PolynomialElements, _ComplexExpr],
+    moment_matrix: MomentMatrix[MonomialType, complex],
+    mapped_variables: dict[MonomialType, _ComplexExpr],
 ) -> Expression:
     """Build a (localising) moment matrix of a complex-valued problem as its real symmetric embedding.
 
@@ -214,14 +214,14 @@ def get_mosek_hermitian_psd_variable(model: Model, name: str, size: int) -> PSDV
 
 def fill_real_primal_model(
     model: Model,
-    sdp: BaseSdpRelaxation[PolynomialElements, float],
+    sdp: BaseSdpRelaxation[MonomialType, float],
     objective_direction: str,
 ) -> None:
     """Add the primal form of a real-valued relaxation to `model`.
 
     Every moment is real, so every monomial maps to a single unbounded MOSEK variable.
     """
-    mapped_variables: dict[PolynomialElements, Expression] = {}
+    mapped_variables: dict[MonomialType, Expression] = {}
 
     for moment_matrix_id, moment_matrix in sdp.moment_matrices.items():
         for monomial in moment_matrix.as_row_col_data_format():
@@ -267,7 +267,7 @@ def fill_real_primal_model(
 
 def fill_complex_primal_model(
     model: Model,
-    sdp: BaseSdpRelaxation[PolynomialElements, complex],
+    sdp: BaseSdpRelaxation[MonomialType, complex],
     objective_direction: str,
 ) -> None:
     """Add the primal form of a complex-valued relaxation to `model`.
@@ -276,7 +276,7 @@ def fill_complex_primal_model(
     of a self-adjoint monomial takes part in complex arithmetic. The realness is carried by the imaginary part, which
     is `None` exactly when the moment is real.
     """
-    mapped_variables: dict[PolynomialElements, _ComplexExpr] = {}
+    mapped_variables: dict[MonomialType, _ComplexExpr] = {}
 
     for moment_matrix_id, moment_matrix in sdp.moment_matrices.items():
         for monomial, (_position_matrix, realness) in moment_matrix.as_row_col_data_format().items():
@@ -335,7 +335,7 @@ def fill_complex_primal_model(
 
 def fill_real_dual_model(
     model: Model,
-    sdp: BaseSdpRelaxation[PolynomialElements, float],
+    sdp: BaseSdpRelaxation[MonomialType, float],
     objective_direction: str,
 ) -> None:
     """Add the dual form of a real-valued relaxation to `model`.
@@ -494,7 +494,7 @@ def hermitian_dot_as_complex_expr(
 
 def fill_complex_dual_model(
     model: Model,
-    sdp: BaseSdpRelaxation[PolynomialElements, complex],
+    sdp: BaseSdpRelaxation[MonomialType, complex],
     objective_direction: str,
 ) -> None:
     """Add the dual form of a complex-valued relaxation to `model`.
@@ -657,7 +657,7 @@ def fill_complex_dual_model(
 #  provides the function with what's a real variable, a complex one, a symmetric one, a hermitian one, and such
 #  that the variables can be multiplied together, be taken the trace of, etc.
 def to_mosek(
-    sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
+    sdp: BaseSdpRelaxation[MonomialType, Scalar],
     objective_direction: str,
     *,
     primal: bool,
@@ -699,18 +699,16 @@ def to_mosek(
         logger.info("Exporting to a primal MOSEK problem.")
 
         if sdp.is_real:
-            fill_real_primal_model(M, cast("BaseSdpRelaxation[PolynomialElements, float]", sdp), objective_direction)
+            fill_real_primal_model(M, cast("BaseSdpRelaxation[MonomialType, float]", sdp), objective_direction)
         else:
-            fill_complex_primal_model(
-                M, cast("BaseSdpRelaxation[PolynomialElements, complex]", sdp), objective_direction
-            )
+            fill_complex_primal_model(M, cast("BaseSdpRelaxation[MonomialType, complex]", sdp), objective_direction)
     else:
         logger.info("Exporting to a dual MOSEK problem.")
 
         if sdp.is_real:
-            fill_real_dual_model(M, cast("BaseSdpRelaxation[PolynomialElements, float]", sdp), objective_direction)
+            fill_real_dual_model(M, cast("BaseSdpRelaxation[MonomialType, float]", sdp), objective_direction)
         else:
-            fill_complex_dual_model(M, cast("BaseSdpRelaxation[PolynomialElements, complex]", sdp), objective_direction)
+            fill_complex_dual_model(M, cast("BaseSdpRelaxation[MonomialType, complex]", sdp), objective_direction)
 
     logger.info("MOSEK problem created.")
 

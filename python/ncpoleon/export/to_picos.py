@@ -17,7 +17,7 @@ except ImportError:
     if TYPE_CHECKING:
         import picos as pc
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import MonomialType, Scalar
 
 if TYPE_CHECKING:
     from ncpoleon.relaxations import BaseSdpRelaxation
@@ -54,7 +54,7 @@ def moment_matrix_entry_to_picos(
 
 
 def to_picos(
-    sdp: BaseSdpRelaxation[PolynomialElements, Scalar],
+    sdp: BaseSdpRelaxation[MonomialType, Scalar],
     objective_direction: str,
     *,
     primal: bool,
@@ -148,7 +148,7 @@ def to_picos(
         for index, (poly, value) in enumerate(sdp.moment_equalities):
             changed = sdp.change_variables(poly, mapped_variables)
             constraints[f"ME-{index}"] = problem.add_constraint(changed == value)
-            logger.debug(f"Added moment constraint {poly} == {value} for moment matrix id {moment_matrix_id}.")
+            logger.debug(f"Added moment constraint {poly} == {value}.")
 
         for index, (poly, value) in enumerate(sdp.moment_inequalities):
             changed = sdp.change_variables(poly, mapped_variables)
@@ -156,7 +156,7 @@ def to_picos(
             # A moment inequality always has a real bound, so it constrains the real part: a non-hermitian polynomial
             # yields a complex expression, which PICOS refuses to order.
             constraints[f"MI-{index}"] = problem.add_constraint(changed.real >= value)
-            logger.debug(f"Added moment constraint {poly} >= {value} for moment matrix id {moment_matrix_id}.")
+            logger.debug(f"Added moment constraint {poly} >= {value}.")
 
         problem.set_objective(objective_direction, sdp.change_variables(sdp.objective, mapped_variables))
     else:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Literal, Self, TypeAlias, TypeVar, overload
+from typing import ClassVar, Literal, Self, TypeAlias, final, overload
+
+from ncpoleon.relaxations import (
+    ComplexCoefficientsCommutativeConstraint,
+    RealCoefficientsCommutativeConstraint,
+)
 
 from .. import Polynomial
-
-Scalar = TypeVar("Scalar", float, complex)
 
 class BaseCommutativePolynomialElement:
     """The API shared by every element a polynomial can be built from.
@@ -21,9 +24,9 @@ class BaseCommutativePolynomialElement:
     @overload
     def __add__(self, other: CommutativePolynomialElement) -> RealCoefficientsCommutativePolynomial: ...
     @overload
-    def __add__(
-        self, other: Polynomial[CommutativePolynomialElement, Scalar]
-    ) -> Polynomial[CommutativePolynomialElement, Scalar]: ...
+    def __add__(self, other: Polynomial[CommutativeMonomial, float]) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __add__(self, other: Polynomial[CommutativeMonomial, complex]) -> ComplexCoefficientsCommutativePolynomial: ...
     @overload
     def __radd__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
     @overload
@@ -35,9 +38,9 @@ class BaseCommutativePolynomialElement:
     @overload
     def __sub__(self, other: CommutativePolynomialElement) -> RealCoefficientsCommutativePolynomial: ...
     @overload
-    def __sub__(
-        self, other: Polynomial[CommutativePolynomialElement, Scalar]
-    ) -> Polynomial[CommutativePolynomialElement, Scalar]: ...
+    def __sub__(self, other: Polynomial[CommutativeMonomial, float]) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __sub__(self, other: Polynomial[CommutativeMonomial, complex]) -> ComplexCoefficientsCommutativePolynomial: ...
     @overload
     def __rsub__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
     @overload
@@ -49,9 +52,9 @@ class BaseCommutativePolynomialElement:
     @overload
     def __mul__(self, other: CommutativePolynomialElement) -> CommutativeMonomial: ...
     @overload
-    def __mul__(
-        self, other: Polynomial[CommutativePolynomialElement, Scalar]
-    ) -> Polynomial[CommutativePolynomialElement, Scalar]: ...
+    def __mul__(self, other: Polynomial[CommutativeMonomial, float]) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __mul__(self, other: Polynomial[CommutativeMonomial, complex]) -> ComplexCoefficientsCommutativePolynomial: ...
     @overload
     def __rmul__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
     @overload
@@ -60,6 +63,30 @@ class BaseCommutativePolynomialElement:
     def __truediv__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
     @overload
     def __truediv__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __eq__(
+        self, other: float | CommutativePolynomialElement | Polynomial[CommutativeMonomial, float]
+    ) -> RealCoefficientsCommutativeConstraint: ...
+    @overload
+    def __eq__(  # ty: ignore[invalid-method-override]
+        self, other: complex | Polynomial[CommutativeMonomial, complex]
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    @overload
+    def __ge__(
+        self, other: float | CommutativePolynomialElement | Polynomial[CommutativeMonomial, float]
+    ) -> RealCoefficientsCommutativeConstraint: ...
+    @overload
+    def __ge__(
+        self, other: complex | Polynomial[CommutativeMonomial, complex]
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    @overload
+    def __le__(
+        self, other: float | CommutativePolynomialElement | Polynomial[CommutativeMonomial, float]
+    ) -> RealCoefficientsCommutativeConstraint: ...
+    @overload
+    def __le__(
+        self, other: complex | Polynomial[CommutativeMonomial, complex]
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
     def __neg__(self) -> RealCoefficientsCommutativePolynomial: ...
@@ -69,17 +96,157 @@ class BaseCommutativePolynomialElement:
     @property
     def moment_matrix_id(self) -> int: ...
 
+@final
 class CommutativeOperator(BaseCommutativePolynomialElement): ...
 
+@final
 class CommutativeMonomial(BaseCommutativePolynomialElement):
     def __len__(self) -> int: ...
 
 CommutativePolynomialElement: TypeAlias = CommutativeMonomial | CommutativeOperator
 
-class CommutativePolynomial(Polynomial[CommutativePolynomialElement, Scalar]): ...
+# The two classes below are separate `#[pyclass]`es, one per monomorphisation of the Rust
+# `Polynomial<CommutativeMonomial, Scalar>`, so they are spelled out rather than left generic in the
+# coefficient type: only that way can the promotion to complex coefficients that mixed arithmetic
+# performs be stated exactly. They restate only what `Polynomial` cannot already say for these
+# parameters; everything it declares in terms of `MonomialType`, `Scalar` and `Self` is already
+# exact here and is not repeated.
 
-RealCoefficientsCommutativePolynomial: TypeAlias = CommutativePolynomial[float]
-ComplexCoefficientsCommutativePolynomial: TypeAlias = CommutativePolynomial[complex]
+@final
+class RealCoefficientsCommutativePolynomial(Polynomial[CommutativeMonomial, float]):
+    """A polynomial in commutative variables with real coefficients."""
+
+    @property
+    def is_real(self) -> Literal[True]: ...
+    @overload
+    def __add__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __add__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __add__(self, other: CommutativePolynomialElement) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __add__(self, other: Polynomial[CommutativeMonomial, float]) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __add__(self, other: Polynomial[CommutativeMonomial, complex]) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __radd__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __radd__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __sub__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __sub__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __sub__(self, other: CommutativePolynomialElement) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __sub__(self, other: Polynomial[CommutativeMonomial, float]) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __sub__(self, other: Polynomial[CommutativeMonomial, complex]) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __rsub__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __rsub__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __mul__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __mul__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __mul__(self, other: CommutativePolynomialElement) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __mul__(self, other: Polynomial[CommutativeMonomial, float]) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __mul__(self, other: Polynomial[CommutativeMonomial, complex]) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __rmul__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __rmul__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __truediv__(self, other: float) -> RealCoefficientsCommutativePolynomial: ...
+    @overload
+    def __truediv__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    @overload
+    def __eq__(
+        self, other: float | CommutativePolynomialElement | Polynomial[CommutativeMonomial, float]
+    ) -> RealCoefficientsCommutativeConstraint: ...
+    @overload
+    def __eq__(
+        self, other: complex | Polynomial[CommutativeMonomial, complex]
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    @overload
+    def __ge__(
+        self, other: float | CommutativePolynomialElement | Polynomial[CommutativeMonomial, float]
+    ) -> RealCoefficientsCommutativeConstraint: ...
+    @overload
+    def __ge__(
+        self, other: complex | Polynomial[CommutativeMonomial, complex]
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    @overload
+    def __le__(
+        self, other: float | CommutativePolynomialElement | Polynomial[CommutativeMonomial, float]
+    ) -> RealCoefficientsCommutativeConstraint: ...
+    @overload
+    def __le__(
+        self, other: complex | Polynomial[CommutativeMonomial, complex]
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    __hash__: ClassVar[None]
+
+@final
+class ComplexCoefficientsCommutativePolynomial(Polynomial[CommutativeMonomial, complex]):
+    """A polynomial in commutative variables with complex coefficients.
+
+    `is_real` is `False` for every instance, including one whose coefficients all happen to have a
+    zero imaginary part: it reports which of the two classes this is, not what the coefficients are.
+    """
+
+    @property
+    def is_real(self) -> Literal[False]: ...
+    def __add__(
+        self,
+        other: complex
+        | CommutativePolynomialElement
+        | Polynomial[CommutativeMonomial, float]
+        | Polynomial[CommutativeMonomial, complex],
+    ) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __radd__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __sub__(
+        self,
+        other: complex
+        | CommutativePolynomialElement
+        | Polynomial[CommutativeMonomial, float]
+        | Polynomial[CommutativeMonomial, complex],
+    ) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __rsub__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __mul__(
+        self,
+        other: complex
+        | CommutativePolynomialElement
+        | Polynomial[CommutativeMonomial, float]
+        | Polynomial[CommutativeMonomial, complex],
+    ) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __rmul__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __truediv__(self, other: complex) -> ComplexCoefficientsCommutativePolynomial: ...
+    def __eq__(
+        self,
+        other: complex
+        | CommutativePolynomialElement
+        | Polynomial[CommutativeMonomial, float]
+        | Polynomial[CommutativeMonomial, complex],
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    def __ge__(
+        self,
+        other: complex
+        | CommutativePolynomialElement
+        | Polynomial[CommutativeMonomial, float]
+        | Polynomial[CommutativeMonomial, complex],
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    def __le__(
+        self,
+        other: complex
+        | CommutativePolynomialElement
+        | Polynomial[CommutativeMonomial, float]
+        | Polynomial[CommutativeMonomial, complex],
+    ) -> ComplexCoefficientsCommutativeConstraint: ...
+    __hash__: ClassVar[None]
 
 @overload
 def generate_commutative_variables(

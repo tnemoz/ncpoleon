@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
+from ncpoleon._typing import MonomialType, RealOrComplexMatrix, Scalar
 from ncpoleon.relaxations import Canonicality, Realness
 from ncpoleon.solve.solution import BaseSolution
 
@@ -15,10 +15,10 @@ if TYPE_CHECKING:
     from ncpoleon.relaxations import BaseSdpRelaxation
 
 
-class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
+class PicosSolution(BaseSolution[MonomialType, Scalar]):
     def __init__(
         self,
-        relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
+        relaxation: BaseSdpRelaxation[MonomialType, Scalar],
         problem: pc.Problem,
         constraints: dict[str, pc.constraints.Constraint],
         psd_matrices: dict[str, pc.expressions.Expression],
@@ -35,10 +35,10 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         return self._problem.value
 
     @property
-    def relaxation(self) -> BaseSdpRelaxation[PolynomialElements, Scalar]:
+    def relaxation(self) -> BaseSdpRelaxation[MonomialType, Scalar]:
         return self._relaxation
 
-    def __getitem__(self, monomial: PolynomialElements) -> Scalar:
+    def __getitem__(self, monomial: MonomialType) -> Scalar:
         rewritten_monomial = self._relaxation.rewrite(monomial)
         canonical_monomial, canonicality, realness = self._relaxation.moment_matrices[
             rewritten_monomial.moment_matrix_id
@@ -100,18 +100,16 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         int,
         list[
             tuple[
-                Polynomial[PolynomialElements, Scalar],
+                Polynomial[MonomialType, Scalar],
                 RealOrComplexMatrix,
-                list[PolynomialElements],
+                list[MonomialType],
             ]
         ],
     ]:
         res = {}
 
         for id in self._relaxation.localising_moment_matrices_equalities:
-            to_add: list[
-                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
-            ] = []
+            to_add: list[tuple[Polynomial[MonomialType, Scalar], RealOrComplexMatrix, list[MonomialType]]] = []
 
             for index, (equality_constraint, generating_set) in enumerate(self._relaxation.equalities.get(id, [])):
                 # The equality constraints on symmetric matrices are redundant, and thus Picos doesn't return a
@@ -138,18 +136,16 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         int,
         list[
             tuple[
-                Polynomial[PolynomialElements, Scalar],
+                Polynomial[MonomialType, Scalar],
                 RealOrComplexMatrix,
-                list[PolynomialElements],
+                list[MonomialType],
             ]
         ],
     ]:
         res = {}
 
         for id in self._relaxation.localising_moment_matrices_inequalities:
-            to_add: list[
-                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
-            ] = []
+            to_add: list[tuple[Polynomial[MonomialType, Scalar], RealOrComplexMatrix, list[MonomialType]]] = []
 
             for index, (inequality_constraint, generating_set) in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
@@ -173,18 +169,16 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         int,
         list[
             tuple[
-                Polynomial[PolynomialElements, Scalar],
+                Polynomial[MonomialType, Scalar],
                 RealOrComplexMatrix,
-                list[PolynomialElements],
+                list[MonomialType],
             ]
         ],
     ]:
         res = {}
 
         for id in self._relaxation.localising_moment_matrices_inequalities:
-            to_add: list[
-                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
-            ] = []
+            to_add: list[tuple[Polynomial[MonomialType, Scalar], RealOrComplexMatrix, list[MonomialType]]] = []
 
             for index, (inequality_constraint, generating_set) in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
@@ -204,7 +198,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     @property
     def moment_equalities_multipliers(
         self,
-    ) -> list[tuple[Polynomial[PolynomialElements, Scalar], np.float64 | np.complex128]]:
+    ) -> list[tuple[Polynomial[MonomialType, Scalar], np.float64 | np.complex128]]:
         res = []
 
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_equalities):
@@ -216,7 +210,7 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         return res
 
     @property
-    def moment_inequalities_multipliers(self) -> list[tuple[Polynomial[PolynomialElements, Scalar], np.float64]]:
+    def moment_inequalities_multipliers(self) -> list[tuple[Polynomial[MonomialType, Scalar], np.float64]]:
         res = []
 
         for index, (polynomial_constraint, _scalar) in enumerate(self._relaxation.moment_inequalities):

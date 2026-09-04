@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Literal
 
-from ncpoleon._typing import PolynomialElements, Scalar
+from ncpoleon._typing import MonomialType, Scalar
 from ncpoleon.export import to_mosek, to_picos
 from ncpoleon.logging import set_verbosity_level
 from ncpoleon.solve import MosekSolution, PicosSolution
@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 def solve(
-    relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
+    relaxation: BaseSdpRelaxation[MonomialType, Scalar],
     objective_direction: str,
     *,
     force_primal: bool = False,
     solver: str = "auto",
     verbosity: Literal[0] | Literal[1] | Literal[2] | Literal[3] = 0,
     **solver_parameters,
-) -> BaseSolution[PolynomialElements, Scalar]:
+) -> BaseSolution[MonomialType, Scalar]:
 
     set_verbosity_level(verbosity)
 
