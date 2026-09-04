@@ -310,7 +310,10 @@ def to_picos(
                 else:
                     constraints[f"M-{monomial}"] = problem.add_constraint(new_constraint == -alpha)
 
-                logger.debug(f"Added dual constraint for monomial {monomial}.")
+                logger.debug(
+                    f"Added dual constraint {new_constraint} == {alpha if objective_direction == 'min' else -alpha} "
+                    f"for monomial {monomial}."
+                )
 
     logger.info("PICOS problem created.")
     return problem, constraints, psd_matrices

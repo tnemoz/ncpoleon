@@ -1,10 +1,7 @@
 import pytest
 from ncpoleon import generate_noncommutative_variables, get_relaxation, solve
 
-from .utils import SOLVER_SKIPS, reduce_sos_decomposition
-
-# TODO: Add complex-valued tests, tests for the attributes of the relaxations such that the equality constraints or the
-# monomial index
+from .utils import SOLVER_SKIPS, consistency_check
 
 
 def generate_simple_noncommutative_parameters():
@@ -76,7 +73,7 @@ def test_simple_real_noncommutative_problem(benchmark, solver: str, level: int, 
     sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints)
     sol = benchmark(solve, sdp, "max", force_primal=force_primal, solver=solver)
     assert sol.value == pytest.approx(expected)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) + obj)).is_zero(1e-7)
+    consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -101,7 +98,7 @@ def test_simple_real_noncommutative_problem_with_equality_constraints(
     sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints)
     sol = benchmark(solve, sdp, "max", force_primal=force_primal, solver=solver)
     assert sol.value == pytest.approx(expected)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) + obj)).is_zero(1e-7)
+    consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -125,7 +122,7 @@ def test_simple_real_noncommutative_problem_with_commutative_substitution(
     sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints, substitutions=substitutions)
     sol = benchmark(solve, sdp, "max", force_primal=force_primal, solver=solver)
     assert sol.value == pytest.approx(expected, abs=1e-6)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) + obj)).is_zero(1e-7)
+    consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)
 
 
 @pytest.mark.parametrize("solver, level, expected", generate_simple_noncommutative_parameters())
@@ -154,4 +151,4 @@ def test_simple_real_noncommutative_problem_with_extra_monomials(
 
     sol = solve(sdp, "max", verbosity=0, solver=solver, force_primal=force_primal)
     assert sol.value == pytest.approx(expected, abs=1e-6)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) + obj)).is_zero(1e-7)
+    consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)

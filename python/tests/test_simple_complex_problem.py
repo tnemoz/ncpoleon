@@ -3,7 +3,7 @@ from math import sqrt
 import pytest
 from ncpoleon import generate_noncommutative_variables, get_relaxation, solve
 
-from .utils import SOLVER_SKIPS, SOLVERS, reduce_sos_decomposition
+from .utils import SOLVER_SKIPS, SOLVERS, consistency_check
 
 # The moment constraints exercised below, keyed by the name used in the parametrization ids. The polynomials need the
 # variables, so `_moment_constraints` builds them per test rather than storing them here.
@@ -101,6 +101,7 @@ def test_simple_complex_problem(benchmark, solver: str, level: int, expected: fl
     sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints)
     sol = benchmark(solve, sdp, "min", force_primal=force_primal, solver=solver)
     assert sol.value == pytest.approx(expected, abs=1e-6)
+    consistency_check(sdp, sol, objective_sense="min", sos_tol=1e-07)
 
 
 @pytest.mark.parametrize(
@@ -124,6 +125,7 @@ def test_complex_problem_with_hermitian_moment_inequality(
     )
     sol = benchmark(solve, sdp, "min", force_primal=force_primal, solver=solver)
     assert sol.value == pytest.approx(expected, abs=1e-6)
+    consistency_check(sdp, sol, objective_sense="min", sos_tol=1e-03 if solver == "mosek" and force_primal else 1e-07)
 
 
 @pytest.mark.parametrize(
@@ -145,21 +147,7 @@ def test_complex_problem_with_moment_equality(benchmark, solver: str, case: str,
     )
     sol = benchmark(solve, sdp, "min", force_primal=force_primal, solver=solver)
     assert sol.value == pytest.approx(expected, abs=1e-6)
-
-
-@pytest.mark.parametrize("solver, case, level, force_primal", generate_sos_decomposition_parameters())
-def test_complex_problem_sos_decomposition(solver: str, case: str, level: int, force_primal: bool):
-    """The certificate the real-valued suites check, applied to a complex-valued problem."""
-    x1, x2, obj, operator_constraints = _simple_complex_params()
-    sdp = get_relaxation(
-        [x1, x2],
-        level,
-        obj,
-        operator_constraints=operator_constraints,
-        moment_constraints=_moment_constraints(case, x1, x2),
-    )
-    sol = solve(sdp, "min", force_primal=force_primal, solver=solver)
-    assert (sdp.rewrite(reduce_sos_decomposition(sol.get_sos_decomposition()) - obj)).is_zero(1e-4)
+    consistency_check(sdp, sol, objective_sense="min", sos_tol=1e-03 if solver == "mosek" else 1e-07)
 
 
 def test_non_hermitian_moment_inequality_is_rejected():
@@ -231,3 +219,6 @@ def test_satisfiable_counterparts_still_build(solver: str, force_primal: bool):
         )
         sol = solve(sdp, "min", force_primal=force_primal, solver=solver)
         assert sol.value == pytest.approx(expected, abs=1e-6)
+        consistency_check(
+            sdp, sol, objective_sense="min", sos_tol=1e-03 if solver == "mosek" and force_primal else 1e-07
+        )

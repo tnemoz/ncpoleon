@@ -49,8 +49,7 @@ class SingleMomentEqualityDecomposition(Generic[PolynomialElements, Scalar]):
     Docs TODO:
     """
 
-    generator: Polynomial[PolynomialElements, Scalar]
-    coefficient: Scalar
+    term: Polynomial[PolynomialElements, Scalar]
 
 
 @dataclass(eq=False, order=False, kw_only=True)
@@ -60,8 +59,7 @@ class SingleMomentInequalityDecomposition(Generic[PolynomialElements, Scalar]):
     Docs TODO:
     """
 
-    generator: Polynomial[PolynomialElements, Scalar]
-    coefficient: float
+    term: Polynomial[PolynomialElements, Scalar]
 
 
 @dataclass(eq=False, order=False, kw_only=True)

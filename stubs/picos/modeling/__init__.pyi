@@ -58,6 +58,10 @@ class SolutionFailure(RuntimeError):
     reason: str
 
 class Problem(Valuable, ABC):
+    # `Valuable` types this as `Any`, since what an expression is worth depends on the expression.
+    # A problem is always worth its objective, which is a real number
+    @property
+    def value(self) -> float: ...
     def __init__(
         self,
         name: str | None = ...,

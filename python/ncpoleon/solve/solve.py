@@ -1,6 +1,9 @@
-import logging
-from typing import Literal
+from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING, Literal
+
+from ncpoleon._typing import PolynomialElements, Scalar
 from ncpoleon.export import to_mosek, to_picos
 from ncpoleon.logging import set_verbosity_level
 from ncpoleon.solve import MosekSolution, PicosSolution
@@ -8,18 +11,21 @@ from ncpoleon.solve.solution import BaseSolution
 
 from .utils import automatic_solver_detection
 
+if TYPE_CHECKING:
+    from ncpoleon.relaxations import BaseSdpRelaxation
+
 logger = logging.getLogger(__name__)
 
 
 def solve(
-    relaxation,
+    relaxation: BaseSdpRelaxation[PolynomialElements, Scalar],
     objective_direction: str,
     *,
     force_primal: bool = False,
     solver: str = "auto",
     verbosity: Literal[0] | Literal[1] | Literal[2] | Literal[3] = 0,
     **solver_parameters,
-) -> BaseSolution:
+) -> BaseSolution[PolynomialElements, Scalar]:
 
     set_verbosity_level(verbosity)
 

@@ -44,6 +44,6 @@ def sos_vectors_of_hermitian_matrix(
     positive_eigvals = np.sqrt(eigvals[mask])
     negative_eigvecs = eigvecs[:, ~mask]
     negative_eigvals = np.sqrt(-eigvals[~mask])
-    result = (positive_eigvals * positive_eigvecs).T.conj(), (negative_eigvals * negative_eigvecs).T.conj()
+    result = (positive_eigvals * positive_eigvecs), (negative_eigvals * negative_eigvecs)
 
     return cast(tuple[npt.NDArray[np.float64 | np.complex128], npt.NDArray[np.float64 | np.complex128]], result)

@@ -9,7 +9,7 @@ use log::{debug, info, trace};
 use num_complex::Complex;
 use num_traits::Zero;
 use pyo3::IntoPyObjectExt;
-use pyo3::exceptions::{PyKeyError, PyNotImplementedError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyNotImplementedError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyDict, PyFloat, PyInt, PyList};
 
@@ -1132,6 +1132,41 @@ where
         partition_operator_constraints!(equalities, temporary_equalities, "equality");
         partition_operator_constraints!(inequalities, temporary_inequalities, "inequality");
 
+        debug!("Checking the Hermiticity of operator inequalities.");
+        for operator_inequalities in temporary_inequalities.values() {
+            for (operator_inequality, _generating_set) in operator_inequalities {
+                if !(operator_inequality - operator_inequality.adjoint())
+                    .rewrite(self.substitution_strategy, &self.substitutions)
+                    .map_err(PyValueError::new_err)?
+                    .is_zero()
+                {
+                    return Err(PyValueError::new_err(format!(
+                        "The operator inequality constraint {} ≽ 0 isn't Hermitian.",
+                        operator_inequality
+                    )));
+                }
+            }
+        }
+
+        // FIXME: we may want to allow for non-Hermitian operator equalities, in which case this should be removed, and
+        // the generation of the "localizing" moment matrix should consider the whole matrix, not just the upper
+        // triangular part, since it wouldn't be guaranteed to be Hermitian anymore
+        debug!("Checking the Hermiticity of operator equalities.");
+        for operator_equalities in temporary_equalities.values() {
+            for (operator_equality, _generating_set) in operator_equalities {
+                if !(operator_equality - operator_equality.adjoint())
+                    .rewrite(self.substitution_strategy, &self.substitutions)
+                    .map_err(PyValueError::new_err)?
+                    .is_zero()
+                {
+                    return Err(PyValueError::new_err(format!(
+                        "The operator equality constraint {} = 0 isn't Hermitian.",
+                        operator_equality
+                    )));
+                }
+            }
+        }
+
         // Auto-inject default normalization `<I_k> = 1` for each moment-matrix index `k` that
         // doesn't already appear in a user-supplied normalization constraint. Only normalization
         // constraints contribute to the "covered" set ; generic moment constraints don't, so a user
@@ -1467,6 +1502,7 @@ where
                 }};
             }
 
+            // TODO: if we don't assume that operator equalities are Hermitian, we should use a distinct function
             build_localising_moment_matrices!(temporary_equalities, equalities, localising_moment_matrices_equalities);
             build_localising_moment_matrices!(
                 temporary_inequalities,
@@ -1581,14 +1617,43 @@ where
                                     *symmetric_entry = *symmetric_entry + coefficient.conjugate();
                                 }
                             }
+                            // new_polynomial is Hermitian, so for complex-valued monomials, the adjoint of a canonical
+                            // monomial is guaranteed to appear if the canonical monomial appears. However, it may
+                            // appear in the bottom triangular part of the matrix. As such, we should just check that
+                            // whenever an entry already exists, it's consistent with what we'd like to insert.
                             (Realness::Complex, Canonicality::Canonical) => {
-                                let entry = position_matrix.entry((index_row, index_col)).or_insert(Scalar::zero());
-                                *entry = *entry + coefficient;
+                                match position_matrix.entry((index_row, index_col)) {
+                                    Entry::Vacant(vacant_entry) => {
+                                        vacant_entry.insert(coefficient);
+                                    }
+                                    Entry::Occupied(occupied_entry) => {
+                                        if *occupied_entry.get() != coefficient {
+                                            return Err(PyRuntimeError::new_err(format!(
+                                                "The position ({}, {}) has been visited twice for the monomial {} \
+                                                using different coefficients. This is likely an error on our part, so \
+                                                feel free to open an issue about this!",
+                                                index_row, index_col, monomial
+                                            )));
+                                        }
+                                    }
+                                }
                             }
                             (Realness::Complex, Canonicality::Adjoint) => {
-                                let symmetric_entry =
-                                    position_matrix.entry((index_col, index_row)).or_insert(Scalar::zero());
-                                *symmetric_entry = *symmetric_entry + coefficient.conjugate();
+                                match position_matrix.entry((index_col, index_row)) {
+                                    Entry::Vacant(vacant_entry) => {
+                                        vacant_entry.insert(coefficient.conjugate());
+                                    }
+                                    Entry::Occupied(occupied_entry) => {
+                                        if *occupied_entry.get() != coefficient.conjugate() {
+                                            return Err(PyRuntimeError::new_err(format!(
+                                                "The position ({}, {}) has been visited twice for the monomial {} \
+                                                using different coefficients. This is likely an error on our part, so \
+                                                feel free to open an issue about this!",
+                                                index_row, index_col, monomial
+                                            )));
+                                        }
+                                    }
+                                }
                             }
                         };
                     } else {

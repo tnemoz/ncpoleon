@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
 from ncpoleon._typing import PolynomialElements, RealOrComplexMatrix, Scalar
+from ncpoleon.relaxations import Canonicality, Realness
 from ncpoleon.solve.solution import BaseSolution
 
 if TYPE_CHECKING:
@@ -37,31 +38,38 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     def relaxation(self) -> BaseSdpRelaxation[PolynomialElements, Scalar]:
         return self._relaxation
 
-    def __getitem__(self, monomial) -> Scalar:
+    def __getitem__(self, monomial: PolynomialElements) -> Scalar:
         rewritten_monomial = self._relaxation.rewrite(monomial)
-        canonical_monomial, is_adjoint, is_real_valued = self._relaxation.moment_matrices[
+        canonical_monomial, canonicality, realness = self._relaxation.moment_matrices[
             rewritten_monomial.moment_matrix_id
         ].get_canonical(rewritten_monomial)
 
         if self._primal:
-            if is_adjoint and not is_real_valued:
-                return self._problem.get_variable(str(canonical_monomial)).value.conjugate()
-            else:
-                return self._problem.get_variable(str(canonical_monomial)).value
+            if realness == Realness.Real or canonicality == Canonicality.Canonical:
+                return cast(float, self._problem.get_variable(str(canonical_monomial)).value)
+            return cast(Scalar, self._problem.get_variable(str(canonical_monomial)).value.conjugate())
         else:
-            return -self._constraints[f"M-{canonical_monomial}"].dual
+            dual = -self._constraints[f"M-{canonical_monomial}"].dual
+
+            if realness == Realness.Real:
+                return cast(float, dual)
+
+            # A complex monomial and its adjoint share one constraint, whose row is half the Lagrangian pairing,
+            # and PICOS reports the multiplier of a complex equality conjugated
+            dual /= 2
+            return cast(Scalar, dual.conjugate()) if canonicality == Canonicality.Canonical else cast(Scalar, dual)
 
     @property
     def moment_matrix_by_mm_id(
         self,
     ) -> dict[int, RealOrComplexMatrix]:
-        res = {}
+        res: dict[int, RealOrComplexMatrix] = {}
 
         for id in self._relaxation.moment_matrices:
             if self._primal:
                 res[id] = np.array(self._psd_matrices[f"MM-{id}"].value)
             else:
-                res[id] = np.array(self._constraints[f"Y_{id}"].dual)
+                res[id] = np.array(self._constraints[f"Y_{id}"].dual).conj()
 
             if not res[id].shape:  # For 1x1 constraints or variables, Picos returns a 0D array
                 res[id] = res[id].reshape((1, 1))
@@ -72,11 +80,11 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
     def moment_matrix_multiplier_by_mm_id(
         self,
     ) -> dict[int, RealOrComplexMatrix]:
-        res = {}
+        res: dict[int, RealOrComplexMatrix] = {}
 
         for id in self._relaxation.moment_matrices:
             if self._primal:
-                res[id] = np.array(self._constraints[f"MM-{id}"].dual)
+                res[id] = np.array(self._constraints[f"MM-{id}"].dual).conj()
             else:
                 res[id] = np.array(self._problem.get_variable(f"Y_{id}").value)
 
@@ -101,13 +109,15 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         res = {}
 
         for id in self._relaxation.localising_moment_matrices_equalities:
-            to_add = []
+            to_add: list[
+                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
+            ] = []
 
             for index, (equality_constraint, generating_set) in enumerate(self._relaxation.equalities.get(id, [])):
                 # The equality constraints on symmetric matrices are redundant, and thus Picos doesn't return a
                 # Hermitian matrix for the dual, so we have to hermitianize it
                 if self._primal:
-                    to_hermitianize = np.array(self._constraints[f"LMME-{id}-{index}"].dual)
+                    to_hermitianize = np.array(self._constraints[f"LMME-{id}-{index}"].dual).conj()
                     to_append = (to_hermitianize + to_hermitianize.T.conj()) / 2
                 else:
                     to_append = np.array(self._problem.get_variable(f"Q_{(id, index)}").value)
@@ -130,24 +140,27 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
             tuple[
                 Polynomial[PolynomialElements, Scalar],
                 RealOrComplexMatrix,
+                list[PolynomialElements],
             ]
         ],
     ]:
         res = {}
 
         for id in self._relaxation.localising_moment_matrices_inequalities:
-            to_add = []
+            to_add: list[
+                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
+            ] = []
 
-            for index, inequality_constraint in enumerate(self._relaxation.inequalities.get(id, [])):
+            for index, (inequality_constraint, generating_set) in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
                     to_append = np.array(self._psd_matrices[f"LMMI-{id}-{index}"].value)
                 else:
-                    to_append = np.array(self._constraints[f"P_({id}, {index})"].dual)
+                    to_append = np.array(self._constraints[f"P_({id}, {index})"].dual).conj()
 
                 if not to_append.shape:  # For 1x1 constraints or variables, Picos returns a 0D array
                     to_append = to_append.reshape((1, 1))
 
-                to_add.append((inequality_constraint, to_append))
+                to_add.append((inequality_constraint, to_append, generating_set))
 
             res[id] = to_add
 
@@ -169,11 +182,13 @@ class PicosSolution(BaseSolution[PolynomialElements, Scalar]):
         res = {}
 
         for id in self._relaxation.localising_moment_matrices_inequalities:
-            to_add = []
+            to_add: list[
+                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
+            ] = []
 
             for index, (inequality_constraint, generating_set) in enumerate(self._relaxation.inequalities.get(id, [])):
                 if self._primal:
-                    to_append = np.array(self._constraints[f"LMMI-{id}-{index}"].dual)
+                    to_append = np.array(self._constraints[f"LMMI-{id}-{index}"].dual).conj()
                 else:
                     to_append = np.array(self._problem.get_variable(f"P_({id}, {index})").value)
 

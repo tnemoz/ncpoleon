@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -67,36 +67,46 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
 
         if self._primal:
             if realness == Realness.Real:
-                return self._variable(str(canonical_monomial)).level()[0]
+                return self._variable(str(canonical_monomial)).level().item(0)
             if canonicality == Canonicality.Adjoint:
-                return (
-                    self._variable(f"{str(canonical_monomial)}_re").level()[0]
-                    - self._variable(f"{str(canonical_monomial)}_im").level()[0] * 1j
+                return cast(
+                    Scalar,
+                    self._variable(f"{str(canonical_monomial)}_re").level().item(0)
+                    - self._variable(f"{str(canonical_monomial)}_im").level().item(0) * 1j,
                 )
-            return (
-                self._variable(f"{str(canonical_monomial)}_re").level()[0]
-                + self._variable(f"{str(canonical_monomial)}_im").level()[0] * 1j
+            return cast(
+                Scalar,
+                self._variable(f"{str(canonical_monomial)}_re").level().item(0)
+                + self._variable(f"{str(canonical_monomial)}_im").level().item(0) * 1j,
             )
         else:
             sign = 1 if self._objective_sense == "min" else -1
 
             if realness == Realness.Real:
-                return self._constraint(f"M-{canonical_monomial}").dual()[0] * sign
+                return self._constraint(f"M-{canonical_monomial}").dual().item(0) * sign
             if canonicality == Canonicality.Adjoint:
                 return (
-                    self._constraint(f"M-{canonical_monomial}-re").dual()[0]
-                    - self._constraint(f"M-{canonical_monomial}-im").dual()[0] * 1j
-                ) * sign
+                    cast(
+                        Scalar,
+                        self._constraint(f"M-{canonical_monomial}-re").dual().item(0)
+                        + self._constraint(f"M-{canonical_monomial}-im").dual().item(0) * 1j,
+                    )
+                    * sign
+                )
             return (
-                self._constraint(f"M-{canonical_monomial}-re").dual()[0]
-                + self._constraint(f"M-{canonical_monomial}-im").dual()[0] * 1j
-            ) * sign
+                cast(
+                    Scalar,
+                    self._constraint(f"M-{canonical_monomial}-re").dual().item(0)
+                    - self._constraint(f"M-{canonical_monomial}-im").dual().item(0) * 1j,
+                )
+                * sign
+            )
 
     @property
     def moment_matrix_by_mm_id(
         self,
     ) -> dict[int, RealOrComplexMatrix]:
-        res = {}
+        res: dict[int, RealOrComplexMatrix] = {}
 
         for id, moment_matrix in self._relaxation.moment_matrices.items():
             size = moment_matrix.size
@@ -123,7 +133,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
     def moment_matrix_multiplier_by_mm_id(
         self,
     ) -> dict[int, RealOrComplexMatrix]:
-        res = {}
+        res: dict[int, RealOrComplexMatrix] = {}
 
         for id, moment_matrix in self._relaxation.moment_matrices.items():
             size = moment_matrix.size
@@ -165,7 +175,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             id,
             localizing_moment_matrices_equalities_id,
         ) in self._relaxation.localising_moment_matrices_equalities.items():
-            to_add = []
+            to_add: list[
+                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
+            ] = []
 
             for index, (localizing_moment_matrix, (equality_constraint, generating_set)) in enumerate(
                 zip(localizing_moment_matrices_equalities_id, self._relaxation.equalities.get(id, []), strict=True)
@@ -221,6 +233,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             tuple[
                 Polynomial[PolynomialElements, Scalar],
                 RealOrComplexMatrix,
+                list[PolynomialElements],
             ]
         ],
     ]:
@@ -230,9 +243,11 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             id,
             localizing_moment_matrices_inequalities_id,
         ) in self._relaxation.localising_moment_matrices_inequalities.items():
-            to_add = []
+            to_add: list[
+                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
+            ] = []
 
-            for index, (localizing_moment_matrix, inequality_constraint) in enumerate(
+            for index, (localizing_moment_matrix, (inequality_constraint, generating_set)) in enumerate(
                 zip(localizing_moment_matrices_inequalities_id, self._relaxation.inequalities.get(id, []), strict=True)
             ):
                 if self._primal:
@@ -248,6 +263,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                             localizing_moment_matrix_level.reshape(
                                 localizing_moment_matrix.size, localizing_moment_matrix.size
                             ),
+                            generating_set,
                         )
                     )
                 else:
@@ -268,6 +284,7 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
                             * localizing_moment_matrix_level[
                                 localizing_moment_matrix.size :, : localizing_moment_matrix.size
                             ],
+                            generating_set,
                         )
                     )
 
@@ -294,7 +311,9 @@ class MosekSolution(BaseSolution[PolynomialElements, Scalar]):
             id,
             localizing_moment_matrices_inequalities_id,
         ) in self._relaxation.localising_moment_matrices_inequalities.items():
-            to_add = []
+            to_add: list[
+                tuple[Polynomial[PolynomialElements, Scalar], RealOrComplexMatrix, list[PolynomialElements]]
+            ] = []
 
             for index, (localizing_moment_matrix, (inequality_constraint, generating_set)) in enumerate(
                 zip(localizing_moment_matrices_inequalities_id, self._relaxation.inequalities.get(id, []), strict=True)
