@@ -202,6 +202,8 @@ def to_picos(
 
         variable_builder = pc.SymmetricVariable if is_problem_real_valued else pc.HermitianVariable
 
+        objective_coefficients_real, objective_coefficients_complex = sdp.get_coefficients_by_canonical(sdp.objective)
+
         for moment_matrix_index, moment_matrix in sdp.moment_matrices.items():
             Y = variable_builder(f"Y_{moment_matrix_index}", moment_matrix.size)
             constraints[f"Y_{moment_matrix_index}"] = problem.add_constraint(Y >> 0)
@@ -295,10 +297,6 @@ def to_picos(
                             monomial, (0.0 + 0.0j, 0.0 + 0.0j)
                         )
                         new_constraint += (nu_n.conj * delta + nu_n * eps.conjugate()) / 2
-
-                objective_coefficients_real, objective_coefficients_complex = sdp.get_coefficients_by_canonical(
-                    sdp.objective
-                )
 
                 if realness == Realness.Real:
                     alpha = complex(objective_coefficients_real.get(monomial, 0.0)).real

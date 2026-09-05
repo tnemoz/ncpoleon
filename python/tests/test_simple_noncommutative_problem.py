@@ -124,6 +124,30 @@ def test_simple_real_noncommutative_problem_with_commutative_substitution(
     assert sol.value == pytest.approx(expected, abs=1e-6)
     consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)
 
+@pytest.mark.parametrize("solver, level, expected", generate_simple_noncommutative_with_substitution_parameters())
+@pytest.mark.parametrize("force_primal", [True, False])
+def test_simple_real_noncommutative_problem_with_commutative_substitution_as_nonhermitian_operator_equalities(
+    benchmark, solver: str, level: int, expected: float, force_primal: bool
+):
+    x1, x2, obj = _simple_noncommutative_vars()
+    operator_constraints = [x1 - x1**2 >= 0, x2 - x2**2 >= 0, x2 * x1 == x1 * x2]
+    sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints)
+    sol = benchmark(solve, sdp, "max", force_primal=force_primal, solver=solver)
+    assert sol.value == pytest.approx(expected, abs=1e-6)
+    consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)
+
+@pytest.mark.parametrize("solver, level, expected", generate_simple_noncommutative_with_substitution_parameters())
+@pytest.mark.parametrize("force_primal", [True, False])
+def test_simple_real_noncommutative_problem_with_commutative_substitution_as_hermitian_operator_equalities(
+    benchmark, solver: str, level: int, expected: float, force_primal: bool
+):
+    x1, x2, obj = _simple_noncommutative_vars()
+    operator_constraints = [x1 - x1**2 >= 0, x2 - x2**2 >= 0, 1j*(x2 * x1 - x1 * x2) == 0]
+    sdp = get_relaxation([x1, x2], level, obj, operator_constraints=operator_constraints)
+    sol = benchmark(solve, sdp, "max", force_primal=force_primal, solver=solver)
+    assert sol.value == pytest.approx(expected, abs=1e-6)
+    consistency_check(sdp, sol, objective_sense="max", sos_tol=1e-07)
+
 
 @pytest.mark.parametrize("solver, level, expected", generate_simple_noncommutative_parameters())
 @pytest.mark.parametrize("force_primal", [True, False])

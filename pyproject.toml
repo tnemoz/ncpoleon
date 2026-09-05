@@ -33,12 +33,9 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dynamic = ["version"]
-dependencies = [
-    "numpy>=2.3.0",
-    "scipy>=1.17.1",
-]
+dependencies = ["numpy>=2.3.0", "scipy>=1.17.1"]
 
 [project.urls]
 Homepage = "https://github.com/ncpoleon/ncpoleon/"
@@ -66,7 +63,6 @@ dev = [
     "pytest-split>=0.11.0",
     "scipy-stubs>=1.17.1.5",
     "ty>=0.0.77",
-    "numpy >= 2.5.0"  # Used for array shape typing
 ]
 
 [tool.maturin]

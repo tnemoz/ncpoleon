@@ -18,20 +18,16 @@ def automatic_solver_detection() -> str:
 
 
 @overload
-def sos_vectors_of_hermitian_matrix(
+def sos_vectors_of_hermitian_psd_matrix(
     matrix: np.ndarray[tuple[int, int], np.dtype[np.float64]], cutoff: float
-) -> tuple[np.ndarray[tuple[int, int], np.dtype[np.float64]], np.ndarray[tuple[int, int], np.dtype[np.float64]]]: ...
+) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]: ...
 @overload
-def sos_vectors_of_hermitian_matrix(
+def sos_vectors_of_hermitian_psd_matrix(
     matrix: np.ndarray[tuple[int, int], np.dtype[np.complex128]], cutoff: float
-) -> tuple[
-    np.ndarray[tuple[int, int], np.dtype[np.complex128]], np.ndarray[tuple[int, int], np.dtype[np.complex128]]
-]: ...
+) -> np.ndarray[tuple[int, int], np.dtype[np.complex128]]: ...
 
 
-def sos_vectors_of_hermitian_matrix(
-    matrix: RealOrComplexMatrix, cutoff: float
-) -> tuple[RealOrComplexMatrix, RealOrComplexMatrix]:
+def sos_vectors_of_hermitian_psd_matrix(matrix: RealOrComplexMatrix, cutoff: float) -> RealOrComplexMatrix:
     eigvals, eigvecs = np.linalg.eigh(matrix)
 
     # Remove small eigvals
@@ -39,12 +35,4 @@ def sos_vectors_of_hermitian_matrix(
     eigvecs = eigvecs[:, cutoff_mask]
     eigvals = eigvals[cutoff_mask]
 
-    # Split positive and negative eigvals
-    mask = eigvals >= 0
-    positive_eigvecs = eigvecs[:, mask]
-    positive_eigvals = np.sqrt(eigvals[mask])
-    negative_eigvecs = eigvecs[:, ~mask]
-    negative_eigvals = np.sqrt(-eigvals[~mask])
-    result = (positive_eigvals * positive_eigvecs), (negative_eigvals * negative_eigvecs)
-
-    return cast(tuple[RealOrComplexMatrix, RealOrComplexMatrix], result)
+    return cast(RealOrComplexMatrix, np.sqrt(eigvals) * eigvecs)

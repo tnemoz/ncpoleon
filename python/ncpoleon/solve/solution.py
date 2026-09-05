@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Generic
 import numpy as np
 
 from ncpoleon._typing import MonomialType, RealOrComplexMatrix, Scalar
-from ncpoleon.solve.utils import sos_vectors_of_hermitian_matrix
+from ncpoleon.solve.utils import sos_vectors_of_hermitian_psd_matrix
 
 from .sos_decomposition import (
     LocalizingMomentMatrixEqualityDecomposition,
@@ -218,7 +218,7 @@ class BaseSolution(ABC, Generic[MonomialType, Scalar]):
                     moment_inequality_multipliers[mm_id] = [(poly_id, scalar)]
 
         for mm_id in self.relaxation.moment_matrices:
-            sos_vectors = sos_vectors_of_hermitian_matrix(moment_matrix_multipliers[mm_id], cutoff)[0]
+            sos_vectors = sos_vectors_of_hermitian_psd_matrix(moment_matrix_multipliers[mm_id], cutoff)[0]
             n_monomials = sos_vectors.shape[0]
             decomposition = (np.array(self.relaxation.generating_sets[mm_id][:n_monomials]) @ sos_vectors).tolist()
 
@@ -233,7 +233,7 @@ class BaseSolution(ABC, Generic[MonomialType, Scalar]):
             for generator, coefficient, generating_set in localizing_moment_matrices_multipliers_inequality.get(
                 mm_id, []
             ):
-                sos_vectors = sos_vectors_of_hermitian_matrix(coefficient, cutoff)[0]
+                sos_vectors = sos_vectors_of_hermitian_psd_matrix(coefficient, cutoff)[0]
                 decompositions = (np.array(generating_set) @ sos_vectors).tolist()
 
                 if delta:
@@ -250,7 +250,7 @@ class BaseSolution(ABC, Generic[MonomialType, Scalar]):
             for generator, coefficient, generating_set in localizing_moment_matrices_multipliers_equality.get(
                 mm_id, []
             ):
-                sos_vectors_pos, sos_vectors_neg = sos_vectors_of_hermitian_matrix(coefficient, cutoff)
+                sos_vectors_pos, sos_vectors_neg = sos_vectors_of_hermitian_psd_matrix(coefficient, cutoff)
                 decomposition_positive = (np.array(generating_set) @ sos_vectors_pos).tolist()
                 decomposition_negative = (np.array(generating_set) @ sos_vectors_neg).tolist()
 

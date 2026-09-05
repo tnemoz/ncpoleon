@@ -37,9 +37,7 @@ class LocalizingMomentMatrixEqualityDecomposition(Generic[MonomialType, Scalar])
     Docs TODO:
     """
 
-    generator: Polynomial[MonomialType, Scalar]
-    decomposition_positive: list[Polynomial[MonomialType, Scalar]]
-    decomposition_negative: list[Polynomial[MonomialType, Scalar]]
+    terms: Polynomial[MonomialType, Scalar]
 
 
 @dataclass(eq=False, order=False, kw_only=True)

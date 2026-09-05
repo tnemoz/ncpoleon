@@ -825,15 +825,28 @@ macro_rules! impl_sdp_relaxation_pymethods {
             }
 
             /// Localising moment matrices for the equality constraints.
-            ///
-            /// Same structure as `localising_moment_matrices_inequalities` but
-            /// for each equality constraint polynomial.
             #[getter]
-            fn localising_moment_matrices_equalities(&self) -> BTreeMap<u8, Vec<$py_moment_matrix>> {
+            fn localising_moment_matrices_equalities(&self) -> BTreeMap<u8, Vec<Vec<$py_poly>>> {
                 self.0
                     .localising_moment_matrices_equalities
                     .iter()
-                    .map(|(&index, equalities)| (index, equalities.iter().map(|moment_matrix| $py_moment_matrix(moment_matrix.clone())).collect()))
+                    .map(|(&mm_id, equalities_id)| {
+                        (
+                            mm_id,
+                            equalities_id
+                                .iter()
+                                .map(|generating_set| {
+                                    (
+                                        generating_set
+                                            .iter()
+                                            .cloned()
+                                            .map($py_poly)
+                                            .collect()
+                                    )
+                                })
+                                .collect()
+                        )
+                    })
                     .collect()
             }
 
@@ -905,6 +918,7 @@ macro_rules! impl_sdp_relaxation_pymethods {
 }
 
 type PolynomialWithGeneratingSet<MonomialType, Scalar> = (Polynomial<MonomialType, Scalar>, Vec<MonomialType>);
+type OperatorEqualityAsMoments<MonomialType, Scalar> = Vec<Polynomial<MonomialType, Scalar>>;
 
 pub(super) struct SdpRelaxation<MonomialType: AdjointTrait + Ord, Scalar: PolynomialDtype> {
     objective: Polynomial<MonomialType, Scalar>,
@@ -916,7 +930,7 @@ pub(super) struct SdpRelaxation<MonomialType: AdjointTrait + Ord, Scalar: Polyno
     moment_inequalities: Vec<(Polynomial<MonomialType, Scalar>, f64)>,
     moment_matrices: BTreeMap<u8, RustMomentMatrix<Scalar, MonomialType>>,
     generating_sets: BTreeMap<u8, Vec<MonomialType>>,
-    localising_moment_matrices_equalities: BTreeMap<u8, Vec<RustMomentMatrix<Scalar, MonomialType>>>,
+    localising_moment_matrices_equalities: BTreeMap<u8, Vec<OperatorEqualityAsMoments<MonomialType, Scalar>>>,
     localising_moment_matrices_inequalities: BTreeMap<u8, Vec<RustMomentMatrix<Scalar, MonomialType>>>,
     extra_monomials: BTreeMap<u8, Vec<MonomialType>>,
 }
@@ -1148,25 +1162,6 @@ where
             }
         }
 
-        // FIXME: we may want to allow for non-Hermitian operator equalities, in which case this should be removed, and
-        // the generation of the "localizing" moment matrix should consider the whole matrix, not just the upper
-        // triangular part, since it wouldn't be guaranteed to be Hermitian anymore
-        debug!("Checking the Hermiticity of operator equalities.");
-        for operator_equalities in temporary_equalities.values() {
-            for (operator_equality, _generating_set) in operator_equalities {
-                if !(operator_equality - operator_equality.adjoint())
-                    .rewrite(self.substitution_strategy, &self.substitutions)
-                    .map_err(PyValueError::new_err)?
-                    .is_zero()
-                {
-                    return Err(PyValueError::new_err(format!(
-                        "The operator equality constraint {} = 0 isn't Hermitian.",
-                        operator_equality
-                    )));
-                }
-            }
-        }
-
         // Auto-inject default normalization `<I_k> = 1` for each moment-matrix index `k` that
         // doesn't already appear in a user-supplied normalization constraint. Only normalization
         // constraints contribute to the "covered" set ; generic moment constraints don't, so a user
@@ -1215,17 +1210,19 @@ where
             .collect::<Result<_, _>>()
             .map_err(PyValueError::new_err)?;
 
-        debug!("Checking the Hermiticity of moment inequalities.");
-        for (moment_inequality, scalar) in self.moment_inequalities.iter() {
-            if !(moment_inequality - moment_inequality.adjoint())
-                .rewrite(self.substitution_strategy, &self.substitutions)
-                .map_err(PyValueError::new_err)?
-                .is_zero()
-            {
-                return Err(PyValueError::new_err(format!(
-                    "The moment inequality constraint {} >= {} isn't Hermitian.",
-                    moment_inequality, scalar
-                )));
+        if !self.objective.is_real() {
+            debug!("Checking the Hermiticity of moment inequalities.");
+            for (moment_inequality, scalar) in self.moment_inequalities.iter() {
+                if !(moment_inequality - moment_inequality.adjoint())
+                    .rewrite(self.substitution_strategy, &self.substitutions)
+                    .map_err(PyValueError::new_err)?
+                    .is_zero()
+                {
+                    return Err(PyValueError::new_err(format!(
+                        "The moment inequality constraint {} >= {} isn't Hermitian.",
+                        moment_inequality, scalar
+                    )));
+                }
             }
         }
 
@@ -1406,7 +1403,7 @@ where
 
                     // FIXME: This repeats code in the get_localizing_moment_matrix function. The only difference
                     //  is that we're performing multiplications betweeen monomials instead of between polynomials,
-                    //  with the polynomial being 1. If this doesn't have a huge impac on performance, we should
+                    //  with the polynomial being 1. If this doesn't have a huge impact on performance, we should
                     // delegate  most of this code to this function with the polynomial being
                     // Scalar::one()
                     let use_symmetric_matrix = is_problem_real_valued
@@ -1450,7 +1447,7 @@ where
             // since filling their generating sets in place would otherwise borrow `self` mutably,
             // which would conflict with the immutable borrow taken by `get_localising_moment_matrix`
             macro_rules! build_localising_moment_matrices {
-                ($temporary_constraints:expr, $constraints_field:ident, $matrices_field:ident) => {{
+                ($temporary_constraints:expr, $constraints_field:ident, $matrices_field:ident, $generating_func:ident $(, $extra_args:expr)* $(,)?) => {{
                     let mut new_localising_moment_matrices = Vec::new();
                     if let Some(mut constraints) = $temporary_constraints.remove(&moment_matrix_id) {
                         new_localising_moment_matrices.reserve_exact(constraints.len());
@@ -1487,10 +1484,10 @@ where
                                     )));
                                 }
                             }
-                            new_localising_moment_matrices.push(self.get_localising_moment_matrix(
+                            new_localising_moment_matrices.push(self.$generating_func(
                                 constraint,
                                 generating_set,
-                                &new_moment_matrix,
+                                $($extra_args,)*
                                 verbosity,
                                 top_bar,
                             )?);
@@ -1503,11 +1500,18 @@ where
             }
 
             // TODO: if we don't assume that operator equalities are Hermitian, we should use a distinct function
-            build_localising_moment_matrices!(temporary_equalities, equalities, localising_moment_matrices_equalities);
+            build_localising_moment_matrices!(
+                temporary_equalities,
+                equalities,
+                localising_moment_matrices_equalities,
+                get_localizing_moment_equalities
+            );
             build_localising_moment_matrices!(
                 temporary_inequalities,
                 inequalities,
-                localising_moment_matrices_inequalities
+                localising_moment_matrices_inequalities,
+                get_localising_moment_matrix,
+                &new_moment_matrix
             );
 
             self.moment_matrices.insert(moment_matrix_id, new_moment_matrix);
@@ -1627,12 +1631,20 @@ where
                                         vacant_entry.insert(coefficient);
                                     }
                                     Entry::Occupied(occupied_entry) => {
-                                        if *occupied_entry.get() != coefficient {
+                                        let incoming: Complex<f64> = coefficient.into();
+                                        let existing: Complex<f64> = (*occupied_entry.get()).into();
+                                        if (existing - incoming).norm()
+                                            > 1e-9 * existing.norm().max(incoming.norm()).max(1.0)
+                                        {
                                             return Err(PyRuntimeError::new_err(format!(
                                                 "The position ({}, {}) has been visited twice for the monomial {} \
-                                                using different coefficients. This is likely an error on our part, so \
-                                                feel free to open an issue about this!",
-                                                index_row, index_col, monomial
+                                                using different coefficients ({} and {}). This is likely an error on \
+                                                our part, so feel free to open an issue about this!",
+                                                index_row,
+                                                index_col,
+                                                monomial,
+                                                coefficient,
+                                                occupied_entry.get()
                                             )));
                                         }
                                     }
@@ -1644,12 +1656,20 @@ where
                                         vacant_entry.insert(coefficient.conjugate());
                                     }
                                     Entry::Occupied(occupied_entry) => {
-                                        if *occupied_entry.get() != coefficient.conjugate() {
+                                        let incoming: Complex<f64> = coefficient.conjugate().into();
+                                        let existing: Complex<f64> = (*occupied_entry.get()).into();
+                                        if (existing - incoming).norm()
+                                            > 1e-9 * existing.norm().max(incoming.norm()).max(1.0)
+                                        {
                                             return Err(PyRuntimeError::new_err(format!(
                                                 "The position ({}, {}) has been visited twice for the monomial {} \
-                                                using different coefficients. This is likely an error on our part, so \
-                                                feel free to open an issue about this!",
-                                                index_row, index_col, monomial
+                                                using different coefficients ({} and {}). This is likely an error on \
+                                                our part, so feel free to open an issue about this!",
+                                                index_row,
+                                                index_col,
+                                                monomial,
+                                                coefficient,
+                                                occupied_entry.get()
                                             )));
                                         }
                                     }
@@ -1692,5 +1712,70 @@ where
         }
 
         Ok(new_localising_moment_matrix)
+    }
+
+    fn get_localizing_moment_equalities(
+        &self,
+        polynomial: &Polynomial<Monomial<Data>, Scalar>,
+        generating_set: &[Monomial<Data>],
+        verbosity: u8,
+        top_bar: bool,
+    ) -> PyResult<OperatorEqualityAsMoments<Monomial<Data>, Scalar>>
+    where
+        Monomial<Data>: Display + RewritingTrait<Monomial<Data>>,
+        Polynomial<Monomial<Data>, Scalar>: Display,
+    {
+        let size = generating_set.len();
+
+        // If the polynomial is Hermitian, we only need to consider the upper triangular part of the matrix
+        let is_hermitian = (polynomial - polynomial.adjoint())
+            .rewrite(self.substitution_strategy, &self.substitutions)
+            .map_err(PyValueError::new_err)?
+            .is_zero();
+
+        let mut moment_equalities = Vec::with_capacity(if is_hermitian {
+            (generating_set.len() * (generating_set.len() + 1)) / 2
+        } else {
+            generating_set.len().pow(2)
+        });
+
+        let monomials_iterator_rows = if verbosity > 0 {
+            itertools::Either::Left(tqdm!(
+                generating_set.iter().enumerate(),
+                desc = "Filling localising matrix rows",
+                position = if top_bar { 2 } else { 1 },
+                leave = false,
+                total = size
+            ))
+        } else {
+            itertools::Either::Right(generating_set.iter().enumerate())
+        };
+
+        for (index_row, operator_row) in monomials_iterator_rows {
+            // Slicing rather than `skip` keeps this at n*(n+1)/2 instead of n^2.
+            let monomials_iterator_cols = if is_hermitian {
+                itertools::Either::Left(generating_set[index_row..].iter())
+            } else {
+                itertools::Either::Right(generating_set.iter())
+            };
+
+            for operator_col in monomials_iterator_cols {
+                // FIXME: no need to recompute the adjoint each time
+                let operator_row_adjoint = operator_row.adjoint();
+                trace!(
+                    "Rewriting {} * {} * {}, before adding it as a moment equality.",
+                    operator_row_adjoint, polynomial, operator_col
+                );
+                let intermediate = (operator_row_adjoint * polynomial).map_err(PyValueError::new_err)?;
+                let new_polynomial = (intermediate * operator_col)
+                    .map_err(PyValueError::new_err)?
+                    .rewrite(self.substitution_strategy, &self.substitutions)
+                    .map_err(PyValueError::new_err)?;
+                trace!("Adding the rewritten polynomial {} to the moment equalities.", new_polynomial);
+                moment_equalities.push(new_polynomial);
+            }
+        }
+
+        Ok(moment_equalities)
     }
 }

@@ -234,10 +234,11 @@ def fill_real_primal_model(
         logger.debug(f"Added moment matrix PSD constraint for moment matrix id {moment_matrix_id}.")
 
     for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
-        for index, equality_moment_matrix in enumerate(equality_moment_matrices):
-            localising_matrix = real_moment_matrix_to_mosek(equality_moment_matrix, mapped_variables)
-            model.constraint(f"LMME-{moment_matrix_id}-{index}", localising_matrix, Domain.equalsTo(0))
-            logger.debug(f"Added constraint {localising_matrix} == 0 for moment matrix id {moment_matrix_id}.")
+        for equality_moment_matrix in equality_moment_matrices:
+            for index, poly in enumerate(equality_moment_matrix):
+                changed = sdp.change_variables(poly, mapped_variables)
+                model.constraint(f"ME-{moment_matrix_id}-{index}", changed, Domain.equalsTo(0))
+                logger.debug(f"Added constraint {changed} == 0.")
 
     for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
         for index, inequality_moment_matrix in enumerate(inequality_moment_matrices):
@@ -296,9 +297,14 @@ def fill_complex_primal_model(
 
     for moment_matrix_id, equality_moment_matrices in sdp.localising_moment_matrices_equalities.items():
         for index, equality_moment_matrix in enumerate(equality_moment_matrices):
-            localising_matrix = complex_moment_matrix_to_mosek(equality_moment_matrix, mapped_variables)
-            model.constraint(f"LMME-{moment_matrix_id}-{index}", localising_matrix, Domain.equalsTo(0))
-            logger.debug(f"Added constraint {localising_matrix} == 0 for moment matrix id {moment_matrix_id}.")
+            for poly in equality_moment_matrix:
+                changed = sdp.change_variables(poly, mapped_variables)
+                model.constraint(f"ME-{moment_matrix_id}-{index}_re", changed.real, Domain.equalsTo(0.0))
+                logger.debug(f"Added constraint {changed.real} == 0.0.")
+
+                if changed.imag is not None:
+                    model.constraint(f"ME-{moment_matrix_id}-{index}_im", changed.imag, Domain.equalsTo(0.0))
+                    logger.debug(f"Added constraint {changed.imag} == 0.0.")
 
     for moment_matrix_id, inequality_moment_matrices in sdp.localising_moment_matrices_inequalities.items():
         for index, inequality_moment_matrix in enumerate(inequality_moment_matrices):
@@ -388,60 +394,51 @@ def fill_real_dual_model(
         ]
         logger.debug(f"Added {len(Ps)} PSD variable(s) P_* for moment matrix {moment_matrix_index}.")
 
-        # A free symmetric multiplier is the difference of two PSD ones
-        Qs = [
-            Expr.sub(
-                get_mosek_symmetric_psd_variable(
-                    model, f"Q_{(moment_matrix_index, equality_index)}^0", equality_localizing_matrix.size
-                ),
-                get_mosek_symmetric_psd_variable(
-                    model, f"Q_{(moment_matrix_index, equality_index)}^1", equality_localizing_matrix.size
-                ),
-            )
-            for equality_index, equality_localizing_matrix in enumerate(operator_equalities[moment_matrix_index])
-        ]
-        logger.debug(f"Added {len(Qs)} free symmetric variable Q_* for moment matrix {moment_matrix_index}.")
+        Qs = []
 
-        # Precompute localizing matrix row-col formats outside the monomial loop.
-        localizing_row_cols = [
-            [
-                localizing_matrix.as_row_col_data_format()
-                for localizing_matrix in operator_inequalities[moment_matrix_index]
-            ],
-            [
-                localizing_matrix.as_row_col_data_format()
-                for localizing_matrix in operator_equalities[moment_matrix_index]
-            ],
-        ]
+        for equality_index in range(len(operator_equalities[moment_matrix_index])):
+            Qs.append(model.variable(f"nu_{(moment_matrix_index, equality_index)}"))
+            logger.debug(
+                f"Added dual variable nu_{(moment_matrix_index, equality_index)} for operator equality number "
+                f"{equality_index}."
+            )
 
         for monomial, (position_matrix, _realness) in moment_matrix.as_row_col_data_format().items():
             F = convert_row_col_data_to_mosek_symmetric_matrix(position_matrix, moment_matrix.size)
             constraint_row = Expr.dot(Y, F)
 
-            for lagrange_multipliers, localizing_matrices, precomputed_row_cols in zip(
-                [Ps, Qs],
-                [operator_inequalities[moment_matrix_index], operator_equalities[moment_matrix_index]],
-                localizing_row_cols,
+            for multiplier, localizing_matrix, localizing_matrix_as_row_col in zip(
+                Ps,
+                operator_inequalities[moment_matrix_index],
+                [
+                    localizing_matrix.as_row_col_data_format()
+                    for localizing_matrix in operator_inequalities[moment_matrix_index]
+                ],
             ):
-                for multiplier, localizing_matrix, localizing_matrix_as_row_col in zip(
-                    lagrange_multipliers, localizing_matrices, precomputed_row_cols
-                ):
-                    position_matrix_localizing, localizing_realness = localizing_matrix_as_row_col.get(
-                        monomial, (None, Realness.Real)
-                    )
+                position_matrix_localizing, localizing_realness = localizing_matrix_as_row_col.get(
+                    monomial, (None, Realness.Real)
+                )
 
-                    if position_matrix_localizing is not None:
-                        assert localizing_realness == Realness.Real
-                        G = convert_row_col_data_to_mosek_symmetric_matrix(
-                            position_matrix_localizing, localizing_matrix.size
-                        )
-                        constraint_row = Expr.add(constraint_row, Expr.dot(multiplier, G))
+                if position_matrix_localizing is not None:
+                    assert localizing_realness == Realness.Real
+                    G = convert_row_col_data_to_mosek_symmetric_matrix(
+                        position_matrix_localizing, localizing_matrix.size
+                    )
+                    constraint_row = Expr.add(constraint_row, Expr.dot(multiplier, G))
 
             for lambda_m, (coefficients, _scalar) in zip(lambdas, moment_inequalities_coefficients, strict=True):
                 beta = coefficients.get(monomial, 0.0)
                 constraint_row = Expr.add(constraint_row, Expr.mul(lambda_m, beta))
 
-            for nu_n, (coefficients, _scalar) in zip(nus, moment_equalities_coefficients, strict=True):
+            operator_equalities_split = [
+                (sdp.get_coefficients_by_canonical(poly)[0], 0.0)
+                for polys in sdp.localising_moment_matrices_equalities[moment_matrix_index]
+                for poly in polys
+            ]
+
+            for nu_n, (coefficients, _scalar) in zip(
+                nus + Qs, moment_equalities_coefficients + operator_equalities_split, strict=True
+            ):
                 zeta = coefficients.get(monomial, 0.0)
                 constraint_row = Expr.add(constraint_row, Expr.mul(nu_n, zeta))
 
@@ -549,53 +546,40 @@ def fill_complex_dual_model(
         ]
         logger.debug(f"Added {len(Ps)} PSD variable(s) P_* for moment matrix {moment_matrix_index}.")
 
-        # A free hermitian multiplier is the difference of two PSD ones
-        Qs = [
-            Expr.sub(
-                get_mosek_hermitian_psd_variable(
-                    model, f"Q_{(moment_matrix_index, equality_index)}^0", equality_localizing_matrix.size
-                ),
-                get_mosek_hermitian_psd_variable(
-                    model, f"Q_{(moment_matrix_index, equality_index)}^1", equality_localizing_matrix.size
-                ),
-            )
-            for equality_index, equality_localizing_matrix in enumerate(operator_equalities[moment_matrix_index])
-        ]
-        logger.debug(f"Added {len(Qs)} free hermitian variable Q_* for moment matrix {moment_matrix_index}.")
+        Qs = []
 
-        # Precompute localizing matrix row-col formats outside the monomial loop.
-        localizing_row_cols = [
-            [
-                localizing_matrix.as_row_col_data_format()
-                for localizing_matrix in operator_inequalities[moment_matrix_index]
-            ],
-            [
-                localizing_matrix.as_row_col_data_format()
-                for localizing_matrix in operator_equalities[moment_matrix_index]
-            ],
-        ]
+        for equality_index in range(len(operator_equalities[moment_matrix_index])):
+            Qs.append(
+                _ComplexExpr(
+                    model.variable(f"nu_{(moment_matrix_index, equality_index)}^re"),
+                    model.variable(f"nu_{(moment_matrix_index, equality_index)}^im"),
+                )
+            )
+            logger.debug(
+                f"Added dual variable nu_{(moment_matrix_index, equality_index)} for operator equality number "
+                f"{equality_index}."
+            )
 
         for monomial, (position_matrix, realness) in moment_matrix.as_row_col_data_format().items():
             constraint_row = hermitian_dot_as_complex_expr(Y, position_matrix, moment_matrix.size, realness)
 
-            for lagrange_multipliers, localizing_matrices, precomputed_row_cols in zip(
-                [Ps, Qs],
-                [operator_inequalities[moment_matrix_index], operator_equalities[moment_matrix_index]],
-                localizing_row_cols,
+            for multiplier, localizing_matrix, localizing_matrix_as_row_col in zip(
+                Ps,
+                operator_inequalities[moment_matrix_index],
+                [
+                    localizing_matrix.as_row_col_data_format()
+                    for localizing_matrix in operator_inequalities[moment_matrix_index]
+                ],
             ):
-                for multiplier, localizing_matrix, localizing_matrix_as_row_col in zip(
-                    lagrange_multipliers, localizing_matrices, precomputed_row_cols
-                ):
-                    position_matrix_localizing, localizing_realness = localizing_matrix_as_row_col.get(
-                        monomial, (None, Realness.Real)
-                    )
+                position_matrix_localizing, localizing_realness = localizing_matrix_as_row_col.get(
+                    monomial, (None, Realness.Real)
+                )
 
-                    if position_matrix_localizing is not None:
-                        # A monomial is self-adjoint or not on its own, whichever matrix it appears in
-                        assert localizing_realness == realness
-                        constraint_row = constraint_row + hermitian_dot_as_complex_expr(
-                            multiplier, position_matrix_localizing, localizing_matrix.size, realness
-                        )
+                if position_matrix_localizing is not None:
+                    assert localizing_realness == realness
+                    constraint_row = constraint_row + hermitian_dot_as_complex_expr(
+                        multiplier, position_matrix_localizing, localizing_matrix.size, realness
+                    )
 
             for lambda_m, ((real_coefficients, complex_coefficients), _scalar) in zip(
                 lambdas, split_moment_inequalities, strict=True
@@ -612,8 +596,14 @@ def fill_complex_dual_model(
                         Expr.mul(Expr.mul(lambda_m, beta_complex.imag), 2.0),
                     )
 
+            operator_equalities_split = [
+                (sdp.get_coefficients_by_canonical(poly), 0.0)
+                for polys in sdp.localising_moment_matrices_equalities[moment_matrix_index]
+                for poly in polys
+            ]
+
             for nu_n, ((real_coefficients, complex_coefficients), _scalar) in zip(
-                nus, split_moment_equalities, strict=True
+                nus + Qs, split_moment_equalities + operator_equalities_split, strict=True
             ):
                 if realness == Realness.Real:
                     zeta = real_coefficients.get(monomial, 0.0 + 0.0j)
